@@ -1,0 +1,46 @@
+[package]
+name = "florescence"
+version = "0.1.0"
+readme = "README.md"
+
+edition = "2021"
+authors = [
+    "Byron Wasti <dev@byronwasti.com>"
+]
+categories = []
+keywords = ["raft", "consensus", "gossip", "distributed"]
+description = "An experimental library exposing hybrid Raft and CRDT primitives."
+homepage = "https://github.com/byronwasti/florescence"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/byronwasti/florescence"
+
+[[bin]]
+name = "raft-key-value"
+path = "src/bin/main.rs"
+
+[dependencies]
+openraft = { version = "0.10", path = "../openraft/openraft", features = ["type-alias"] }
+clap = { version = "4.1.11", features = ["derive", "env"] }
+serde = { version = "1.0.114", features = ["derive"] }
+serde_json = "1.0.57"
+tokio = { version = "1.0", default-features = false, features = ["sync"] }
+tracing = "0.1.29"
+tracing-subscriber = { version = "0.3.0", features = ["env-filter"] }
+tonic = "0.12.3"
+tonic-build = "0.12.3"
+dashmap = "6.1.0"
+prost = "0.13.4"
+futures = "0.3.31"
+
+[dev-dependencies]
+anyhow = "1.0.63"
+maplit = "1.0.2"
+
+[features]
+
+[build-dependencies]
+prost-build = "0.13.4"
+tonic-build = "0.12.3"
+
+[package.metadata.docs.rs]
+all-features = true
