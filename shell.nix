@@ -2,5 +2,6 @@
 with pkgs; mkShell {
     buildInputs = with pkgs; [
         protobuf
+        grpcurl
     ];
 }

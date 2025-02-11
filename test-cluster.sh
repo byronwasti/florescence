@@ -22,10 +22,7 @@ rpc() {
     local method=$2
     local body="$3"
     local isApiService="$4"
-    local cmd="grpcurl -plaintext -proto ./proto/management_service.proto -d $body -import-path ./proto localhost:$port openraftpb.ManagementService/$method"
-    if [ "$isApiService" = "true" ]; then
-        cmd="grpcurl -plaintext -proto ./proto/api_service.proto -d $body -import-path ./proto localhost:$port openraftpb.ApiService/$method"
-    fi
+    cmd="grpcurl -plaintext -proto ./proto/app.proto -d $body -import-path ./proto localhost:$port openraftpb.AppService/$method"
 
     echo '---'" rpc(127.0.0.1:$port/$method, $body)"
 
@@ -54,25 +51,25 @@ sleep 1
 
 echo "Start 5 uninitialized raft-key-value servers..."
 
-nohup ./target/debug/raft-key-value --id 1 --addr 127.0.0.1:5051 > n1.log &
+./target/debug/raft-key-value --id 1 --addr 127.0.0.1:5051 > n1.log &
 sleep 1
 echo "Server 1 started"
 
-nohup ./target/debug/raft-key-value --id 2 --addr 127.0.0.1:5052 > n2.log &
+./target/debug/raft-key-value --id 2 --addr 127.0.0.1:5052 > n2.log &
 sleep 1
 echo "Server 2 started"
 
-nohup ./target/debug/raft-key-value --id 3 --addr 127.0.0.1:5053 > n3.log &
+./target/debug/raft-key-value --id 3 --addr 127.0.0.1:5053 > n3.log &
 sleep 1
 echo "Server 3 started"
 sleep 1
 
-nohup ./target/debug/raft-key-value --id 4 --addr 127.0.0.1:5054 > n4.log &
+./target/debug/raft-key-value --id 4 --addr 127.0.0.1:5054 > n4.log &
 sleep 1
 echo "Server 4 started"
 sleep 1
 
-nohup ./target/debug/raft-key-value --id 5 --addr 127.0.0.1:5055 > n5.log &
+./target/debug/raft-key-value --id 5 --addr 127.0.0.1:5055 > n5.log &
 sleep 1
 echo "Server 5 started"
 sleep 1
