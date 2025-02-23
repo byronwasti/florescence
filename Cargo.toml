@@ -15,7 +15,20 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/byronwasti/florescence"
 
 [dependencies]
+bincode = "1.3.3"
+bytes = "1.10.0"
+http = "1.2.0"
+http-body-util = "0.1.2"
+hyper = "1.6.0"
+hyper-util = "0.1.10"
+serde = { version = "1.0.218", features = ["derive"] }
+tokio = { version="1.43.0", features=["rt-multi-thread", "net"] }
+tokio-stream = "0.1.17"
+#tonic = { version="0.12.3", default-features=false, features=["transport", "router"] }
+tonic = { version="0.12.3" }
+tower-service = "0.3.3"
 
-[dev-dependencies]
+[build-dependencies]
+tonic-build = "0.12.3"
 
 [features]
