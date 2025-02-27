@@ -11,4 +11,3 @@ pub struct GossipResponse {
 }
 
 include!(concat!(env!("OUT_DIR"), "/bincode.gossip.Gossip.rs"));
-
