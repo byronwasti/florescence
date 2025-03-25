@@ -1,33 +1,72 @@
-use treeclocks::{itc_map::UpdatePacket, EventTree, ItcMap};
-use std::collections::HashMap;
+use crate::pollinator::{RealityToken, Pollinator};
+use crate::engine::{Engine, EngineConnection};
+use std::collections::{HashMap, HashSet};
+use treeclocks::{EventTree, ItcMap, itc_map::UpdatePacket};
+use std::sync::Arc;
+use std::time::Duration;
 
-struct RealityToken(u64);
+struct Topic(String);
 
-struct FlowerCore<T, I, A> {
+struct FlowerCore<I, A> {
     id: I,
     addr: A,
-    timestamp: EventTree,
-    reality_token: RealityToken,
-    data: ItcMap<T>,
-    decay_list: Vec<I>,
     peer_info: HashMap<I, PeerInfo<I, A>>,
 }
 
 struct PeerInfo<I, A> {
     id: I,
     addr: A,
+    topics: HashSet<Topic>,
 }
 
-struct Message<T, I, A> {
-    id: I,
-    addr: A,
-    timestamp: EventTree,
-    reality_token: RealityToken,
-    kind: MessageKind<T, I, A>,
+
+pub struct Flower {
+    conn: EngineConnection,
 }
 
-enum MessageKind<T, I, A> {
-    Heartbeat,
-    Update(UpdatePacket<T>),
-    RealitySkew { ids: Vec<(I, A)> },
+impl Flower {
+    pub fn builder<I, E>() -> FlowerBuilder<I, E> {
+        FlowerBuilder::default()
+    }
+
+    pub fn pollinator<P: Pollinator + 'static>(&self, interval: Duration) -> P {
+        let (pollinator, inner) = P::from_conn(EngineConnection {});
+        pollinator
+    }
 }
+
+pub struct FlowerBuilder<I, E> {
+    id: Option<I>,
+    engine: Option<E>,
+}
+
+impl<I, E: Engine> FlowerBuilder<I, E> {
+    pub fn id(mut self, id: I) -> Self {
+        self.id = Some(id);
+        self
+    }
+
+    pub fn engine(mut self, engine: E) -> Self {
+        self.engine = Some(engine);
+        self
+    }
+
+    pub async fn bloom(mut self) -> Result<Flower, FlowerError> {
+
+        // TODO: Kick off background task
+        //let conn = self.engine.unwrap().run().await;
+        //Ok(Flower { conn })
+        todo!()
+    }
+}
+
+impl<I, E> Default for FlowerBuilder<I, E> {
+    fn default() -> FlowerBuilder<I, E> {
+        FlowerBuilder {
+            id: None,
+            engine: None,
+        }
+    }
+}
+
+pub enum FlowerError {}

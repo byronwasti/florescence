@@ -1,8 +1,8 @@
 use bytes::{Buf, BufMut};
 use std::marker::PhantomData;
 use tonic::{
-    codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder},
     Status,
+    codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder},
 };
 
 #[derive(Debug)]
@@ -13,7 +13,8 @@ impl<T: serde::Serialize> Encoder for BinCoder<T> {
     type Error = Status;
 
     fn encode(&mut self, item: Self::Item, buf: &mut EncodeBuf<'_>) -> Result<(), Self::Error> {
-        bincode::serialize_into(buf.writer(), &item).map_err(|e| Status::internal(e.to_string()))
+        let _ = bincode::serde::encode_into_std_write(&item, &mut buf.writer(), bincode::config::standard()).map_err(|e| Status::internal(e.to_string()))?;
+        Ok(())
     }
 }
 
@@ -27,7 +28,7 @@ impl<U: serde::de::DeserializeOwned> Decoder for BinCoder<U> {
         }
 
         let item: Self::Item =
-            bincode::deserialize_from(buf.reader()).map_err(|e| Status::internal(e.to_string()))?;
+            bincode::serde::decode_from_std_read(&mut buf.reader(), bincode::config::standard()).map_err(|e| Status::internal(e.to_string()))?;
         Ok(Some(item))
     }
 }

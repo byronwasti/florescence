@@ -6,9 +6,9 @@ fn main() {
             tonic_build::manual::Method::builder()
                 .name("gossip")
                 .route_name("Gossip")
-                .input_type("crate::gossip::GossipRequest")
-                .output_type("crate::gossip::GossipResponse")
-                .codec_path("crate::codec::BinCodec")
+                .input_type("crate::engine::tonic_engine::rpc::TonicReqWrapper")
+                .output_type("crate::engine::tonic_engine::rpc::TonicReqWrapper")
+                .codec_path("crate::engine::tonic_engine::codec::BinCodec")
                 .client_streaming()
                 .server_streaming()
                 .build(),
