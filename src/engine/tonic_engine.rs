@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::str::FromStr;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender, error::TryRecvError};
 use tokio_stream::{Stream, StreamExt, wrappers::UnboundedReceiverStream};
 use tonic::{Request, Response, Status, Streaming, transport::Server};
-use tracing::debug;
+use tracing::{debug, error};
 use uuid::Uuid;
 
 mod codec;
@@ -53,7 +53,7 @@ pub struct TonicEngine<T, I> {
 impl<T, I> TonicEngine<T, I> {
     /// `socket_addr` is the connection on the server side
     /// `addr` is the address clients use
-    fn new(socket_addr: SocketAddr, addr: http::Uri) -> Self {
+    pub fn new(socket_addr: SocketAddr, addr: http::Uri) -> Self {
         let (new_conn_tx, new_conn_rx) = mpsc::unbounded_channel();
         Self {
             socket_addr,
@@ -78,7 +78,6 @@ where
     fn create_conn(&mut self, addr: Uri) -> Connection<T, I, Self::Addr> {
         let (tx0, rx0) = mpsc::unbounded_channel();
         let (tx1, rx1) = mpsc::unbounded_channel();
-        let addr_clone = addr.clone();
         tokio::task::spawn(async move {
             // TODO: Deal with failure
             let mut client = GossipClient::connect(addr.clone().uri).await.unwrap();
@@ -91,7 +90,7 @@ where
                     }
                 });
             // TODO: Deal with failure
-            let mut res = client.gossip(in_stream).await.unwrap();
+            let res = client.gossip(in_stream).await.unwrap();
 
             let mut out_stream = res.into_inner();
 
@@ -121,15 +120,19 @@ where
             }
         });
 
-        Connection {
-            addr: addr_clone,
-            tx: tx0,
-            rx: rx1,
-        }
+        Connection { tx: tx0, rx: rx1 }
     }
 
     fn get_new_conns(&mut self) -> Vec<Connection<T, I, Self::Addr>> {
-        todo!()
+        let mut new_conns = vec![];
+        loop {
+            match self.new_conn_rx.try_recv() {
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => panic!("New connection tx closed."),
+                Ok(val) => new_conns.push(val),
+            }
+        }
+        new_conns
     }
 
     fn start(&mut self) {
@@ -161,9 +164,9 @@ type ResponseStream = Pin<Box<dyn Stream<Item = Result<TonicReqWrapper, Status>>
 #[tonic::async_trait]
 impl<T, I, A> Gossip for Handler<T, I, A>
 where
-    T: Send + Sync + 'static,
-    I: Send + Sync + 'static,
-    A: Send + Sync + 'static,
+    T: Send + Sync + 'static + Serialize + for<'a> Deserialize<'a>,
+    I: Send + Sync + 'static + Serialize + for<'a> Deserialize<'a>,
+    A: Send + Sync + 'static + Serialize + for<'a> Deserialize<'a>,
 {
     type GossipStream = ResponseStream;
     async fn gossip(
@@ -174,24 +177,47 @@ where
         let (tx0, rx0) = mpsc::unbounded_channel();
         let (tx1, rx1) = mpsc::unbounded_channel();
 
+        if let Err(err) = self.tx.send(Connection::new(tx0, rx1)) {
+            error!("New connection rx is closed: {err}");
+            panic!("New connection rx is closed");
+        }
+
         let mut in_stream = request.into_inner();
 
         tokio::spawn(async move {
-            while let res = in_stream.message().await {
+            loop {
+                let res = in_stream.message().await;
                 match res {
                     Ok(None) => {
                         // Stream is closed by peer
                         todo!()
                     }
-                    Ok(v) => {
-                        tx1.send(v);
+                    Ok(Some(val)) => {
+                        if let Ok((val, _)) =
+                            bincode::serde::decode_from_slice(&val.raw, bincode::config::standard())
+                        {
+                            if let Err(err) = tx1.send(val) {
+                                debug!("Internal mpsc errored: {err}");
+                                break;
+                            }
+                        } else {
+                            // TODO: Log error
+                            error!("Unable to deserialize the request");
+                        }
                     }
-                    Err(err) => {}
+                    Err(err) => {
+                        todo!()
+                    }
                 }
             }
         });
 
-        let out_stream = UnboundedReceiverStream::new(rx0);
+        let out_stream = UnboundedReceiverStream::new(rx0).map(|x: PollinationMessage<_, _, _>| {
+            Ok(TonicReqWrapper {
+                raw: bincode::serde::encode_to_vec(x, bincode::config::standard())
+                    .expect("Unable to serialize message"),
+            })
+        });
         Ok(Response::new(Box::pin(out_stream) as Self::GossipStream))
     }
 }

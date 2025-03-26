@@ -25,9 +25,17 @@ pub(crate) struct EngineCore<E, T, I, A> {
 }
 
 pub struct Connection<T, I, A> {
-    pub addr: A,
     pub tx: UnboundedSender<PollinationMessage<T, I, A>>,
     pub rx: UnboundedReceiver<PollinationMessage<T, I, A>>,
+}
+
+impl<T, I, A> Connection<T, I, A> {
+    pub fn new(
+        tx: UnboundedSender<PollinationMessage<T, I, A>>,
+        rx: UnboundedReceiver<PollinationMessage<T, I, A>>,
+    ) -> Self {
+        Self { tx, rx }
+    }
 }
 
 // TODO: Remove
