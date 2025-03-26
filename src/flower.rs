@@ -25,9 +25,11 @@ pub struct Flower {
 }
 
 impl Flower {
+    /*
     pub fn builder<I, E>() -> FlowerBuilder<I, E> {
         FlowerBuilder::default()
     }
+    */
 
     pub fn pollinator<P: Pollinator + 'static>(&self, interval: Duration) -> P {
         let (pollinator, inner) = P::from_conn(EngineConnection {});
@@ -35,12 +37,13 @@ impl Flower {
     }
 }
 
+/*
 pub struct FlowerBuilder<I, E> {
     id: Option<I>,
     engine: Option<E>,
 }
 
-impl<I, E: Engine> FlowerBuilder<I, E> {
+impl<T, I, E: Engine<T, I>> FlowerBuilder<I, E> {
     pub fn id(mut self, id: I) -> Self {
         self.id = Some(id);
         self
@@ -68,5 +71,6 @@ impl<I, E> Default for FlowerBuilder<I, E> {
         }
     }
 }
+*/
 
 pub enum FlowerError {}

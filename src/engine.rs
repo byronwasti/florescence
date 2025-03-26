@@ -5,37 +5,30 @@ use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use crate::message::PollinationMessage;
 use serde::{Serialize, Deserialize};
 
-pub trait Engine {
+pub trait Engine<T, I> {
     type Addr;
 
     /// Must be non-blocking
-    fn start(&mut self, tx: UnboundedSender<EngMessage<Self::Addr>>) -> impl std::future::Future<Output=()> + Send;
+    fn start(&mut self);
 
     fn addr(&self) -> &Self::Addr;
 
-    fn remove_conn(&mut self, addr: Self::Addr) -> impl std::future::Future<Output=()> + Send;
+    fn create_conn(&mut self, addr: Self::Addr) -> Connection<T, I, Self::Addr>;
 
-    fn new_conn<T, I, A>(&mut self, addr: Self::Addr) -> impl std::future::Future<Output=(UnboundedSender<PollinationMessage<T, I, A>>, UnboundedReceiver<PollinationMessage<T, I, A>>)> + Send
-    where T: for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
-          I: for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
-          A: for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static;
+    fn get_new_conns(&mut self) -> Vec<Connection<T, I, Self::Addr>>;
 }
 
-pub(crate) struct EngineCore<E, A> {
+pub(crate) struct EngineCore<E, T, I, A> {
     engine: E,
     pollinators: Vec<PollinatorCore>,
-    connections: Vec<Connection<A>>,
+    connections: Vec<Connection<T, I, A>>,
 }
 
 
-pub struct Connection<A> {
-    addr: A,
-}
-
-pub enum EngMessage<A> {
-    New(Connection<A>),
-    UnableToReach(A),
-    Terminated(A),
+pub struct Connection<T, I, A> {
+    pub addr: A,
+    pub tx: UnboundedSender<PollinationMessage<T, I, A>>,
+    pub rx: UnboundedReceiver<PollinationMessage<T, I, A>>,
 }
 
 // TODO: Remove

@@ -4,10 +4,10 @@ use tonic::{Request, Response, Status, Streaming, transport::Server};
 use tokio::sync::mpsc::{self, UnboundedSender, UnboundedReceiver};
 use crate::message::PollinationMessage;
 use uuid::Uuid;
-use http::Uri;
 use std::net::SocketAddr;
 use tracing::debug;
 use serde::{Serialize, Deserialize};
+use std::str::FromStr;
 
 mod codec;
 mod rpc;
@@ -19,27 +19,56 @@ use rpc::{
     gossip_client::{GossipClient},
 };
 
-
-/// Streaming RPC via Tonic library
-pub struct TonicEngine{
-    socket_addr: SocketAddr,
-    addr: Uri,
-    tx: Option<UnboundedSender<EngMessage<Uri>>>,
+// The http crate doesn't support `serde` via a FF, so have to
+// do this workaround.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Uri {
+    #[serde(with="http_serde::uri")]
+    uri: http::Uri,
 }
 
-impl TonicEngine {
-    /// `socket_addr` is the connection on the server side
-    /// `addr` is the address clients use
-    fn new(socket_addr: SocketAddr, addr: Uri) -> Self {
+impl Uri {
+    pub fn new(uri: http::Uri) -> Self {
         Self {
-            socket_addr,
-            addr,
-            tx: None,
+            uri,
         }
     }
 }
 
-impl Engine for TonicEngine
+impl FromStr for Uri {
+    type Err = <http::Uri as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let uri = s.parse()?;
+        Ok(Self::new(uri))
+    }
+}
+
+/// Streaming RPC via Tonic library
+pub struct TonicEngine<T, I>{
+    socket_addr: SocketAddr,
+    addr: Uri,
+    new_conn_tx: Option<UnboundedSender<Connection<T, I, Uri>>>,
+    new_conn_rx: UnboundedReceiver<Connection<T, I, Uri>>,
+}
+
+impl<T, I> TonicEngine<T, I> {
+    /// `socket_addr` is the connection on the server side
+    /// `addr` is the address clients use
+    fn new(socket_addr: SocketAddr, addr: http::Uri) -> Self {
+        let (new_conn_tx, new_conn_rx) = mpsc::unbounded_channel();
+        Self {
+            socket_addr,
+            addr: Uri { uri: addr },
+            new_conn_tx: Some(new_conn_tx),
+            new_conn_rx,
+        }
+    }
+}
+
+impl<T, I> Engine<T, I> for TonicEngine<T, I>
+where T: Send + Sync + 'static + Serialize + for<'a> Deserialize<'a>,
+      I: Send + Sync + 'static + Serialize + for<'a> Deserialize<'a>,
 {
     type Addr = Uri;
 
@@ -47,20 +76,13 @@ impl Engine for TonicEngine
         &self.addr
     }
 
-    fn remove_conn(&mut self, addr: Self::Addr) -> impl std::future::Future<Output=()> + Send {
-        async {}
-    }
-
-    fn new_conn<T, I, A>(&mut self, addr: Uri) -> impl std::future::Future<Output=(UnboundedSender<PollinationMessage<T, I, A>>, UnboundedReceiver<PollinationMessage<T, I, A>>)> + Send
-    where T: for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
-          I: for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
-          A: for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
-    {
+    fn create_conn(&mut self, addr: Uri) -> Connection<T, I, Self::Addr> {
         let (tx0, rx0) = mpsc::unbounded_channel();
         let (tx1, rx1) = mpsc::unbounded_channel();
+        let addr_clone = addr.clone();
         tokio::task::spawn(async move {
             // TODO: Deal with failure
-            let mut client = GossipClient::connect(addr.clone()).await.unwrap();
+            let mut client = GossipClient::connect(addr.clone().uri).await.unwrap();
             
             let in_stream = UnboundedReceiverStream::new(rx0)
                 .map(|x: PollinationMessage<_, _, _>| {
@@ -98,45 +120,40 @@ impl Engine for TonicEngine
 
                 }
             }
-            /*
-            while let Some(rec) = out_stream.next().await {
-                if let Err(_) = tx1.send(Some(rec)) {
-                    break
-                }
-            }
-            */
-
-            //tx1.send(EngMessage::Terminated(addr))
         });
 
-        std::future::ready((tx0, rx1))
+        Connection {
+            addr: addr_clone,
+            tx: tx0,
+            rx:rx1,
+        }
     }
 
-    fn start(&mut self, tx: UnboundedSender<EngMessage<Uri>>) -> impl std::future::Future<Output=()> + Send
+    fn get_new_conns(&mut self) -> Vec<Connection<T, I, Self::Addr>> {
+        todo!()
+    }
+
+    fn start(&mut self)
     {
-        self.tx = Some(tx.clone());
-        run(self.socket_addr.clone(), tx)
+        let gossiper = Handler::new(self.new_conn_tx.take().expect("start called twice."));
+
+        let socket_addr = self.socket_addr.clone();
+        tokio::task::spawn(async move {
+            Server::builder()
+                .add_service(GossipServer::new(gossiper))
+                .serve(socket_addr)
+                .await
+                .expect("TonicRPC internal failure.")
+        });
     }
 }
 
-async fn run(socket_addr: SocketAddr, tx: UnboundedSender<EngMessage<Uri>>) {
-    let gossiper = Handler::new(tx);
-
-    tokio::task::spawn(async move {
-        Server::builder()
-            .add_service(GossipServer::new(gossiper))
-            .serve(socket_addr)
-            .await
-            .expect("TonicRPC internal failure.")
-    });
+struct Handler<T, I, A> {
+    tx: UnboundedSender<Connection<T, I, A>>,
 }
 
-struct Handler {
-    tx: UnboundedSender<EngMessage<Uri>>,
-}
-
-impl Handler {
-    pub fn new(tx: UnboundedSender<EngMessage<Uri>>) -> Self {
+impl<T, I, A> Handler<T, I, A> {
+    pub fn new(tx: UnboundedSender<Connection<T, I, A>>) -> Self {
         Self {
             tx
         }
@@ -146,7 +163,11 @@ impl Handler {
 type ResponseStream = Pin<Box<dyn Stream<Item = Result<TonicReqWrapper, Status>> + Send>>;
 
 #[tonic::async_trait]
-impl Gossip for Handler {
+impl<T, I, A> Gossip for Handler<T, I, A>
+where T: Send + Sync + 'static,
+      I: Send + Sync + 'static,
+      A: Send + Sync + 'static,
+{
     type GossipStream = ResponseStream;
     async fn gossip(
         &self,

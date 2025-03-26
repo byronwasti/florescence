@@ -31,6 +31,7 @@ treeclocks = { version="0.4.2", path="../treeclocks", features = ["serde"] }
 tonic-build = "0.12.3"
 uuid = { version="1.16.0", features = ["serde"] }
 tracing = "0.1.41"
+http-serde = "2.1.1"
 
 [build-dependencies]
 tonic-build = "0.12.3"
