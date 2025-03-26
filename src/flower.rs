@@ -1,9 +1,9 @@
-use crate::pollinator::{RealityToken, Pollinator};
 use crate::engine::{Engine, EngineConnection};
+use crate::pollinator::{Pollinator, RealityToken};
 use std::collections::{HashMap, HashSet};
-use treeclocks::{EventTree, ItcMap, itc_map::UpdatePacket};
 use std::sync::Arc;
 use std::time::Duration;
+use treeclocks::{EventTree, ItcMap, itc_map::UpdatePacket};
 
 struct Topic(String);
 
@@ -18,7 +18,6 @@ struct PeerInfo<I, A> {
     addr: A,
     topics: HashSet<Topic>,
 }
-
 
 pub struct Flower {
     conn: EngineConnection,

@@ -5,9 +5,7 @@ use std::net::SocketAddr;
 async fn main() {
     let id = "some-id";
     let addr = SocketAddr::parse("0.0.0.0:8001");
-    let flower = Flower::builder(id)
-        .engine(TonicEngine::new(addr))
-        .bloom()?;
+    let flower = Flower::builder(id).engine(TonicEngine::new(addr)).bloom()?;
 
     let p0 = flower.stream_pollinator::<IdentityMap<u32>>();
 

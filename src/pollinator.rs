@@ -1,8 +1,8 @@
 use crate::engine::EngineConnection;
 use crate::*;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use treeclocks::{EventTree, ItcMap};
-use serde::{Serialize, Deserialize};
 
 mod identity_map;
 
@@ -30,5 +30,5 @@ pub(crate) struct PollinatorCore {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct UpdatePacket<T> {
-    inner: T
+    inner: T,
 }

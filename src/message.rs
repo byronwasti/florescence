@@ -1,6 +1,6 @@
-use treeclocks::{EventTree, IdTree};
 use crate::pollinator::{RealityToken, UpdatePacket};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use treeclocks::{EventTree, IdTree};
 
 #[derive(Serialize, Deserialize)]
 pub struct PollinationMessage<T, I, A> {

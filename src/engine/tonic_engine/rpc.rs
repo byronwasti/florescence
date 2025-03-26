@@ -1,7 +1,7 @@
+use crate::message::PollinationMessage;
+use crate::pollinator::RealityToken;
 use serde::{Deserialize, Serialize};
 use treeclocks::EventTree;
-use crate::pollinator::RealityToken;
-use crate::message::PollinationMessage;
 
 // TODO: AFAICT Tonic doesn't support generic RPCs
 // so this is a gross workaround for now.
