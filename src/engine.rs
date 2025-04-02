@@ -1,7 +1,5 @@
-use crate::pollinator::PollinatorCore;
 mod tonic_engine;
 use crate::message::PollinationMessage;
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 pub use tonic_engine::TonicEngine;
 
@@ -18,12 +16,6 @@ pub trait Engine<I>: Send {
     fn create_conn(&mut self, addr: Self::Addr) -> Connection<I, Self::Addr>;
 
     fn get_new_conns(&mut self) -> Vec<Connection<I, Self::Addr>>;
-}
-
-pub(crate) struct EngineCore<E, I, A> {
-    engine: E,
-    pollinators: Vec<PollinatorCore>,
-    connections: Vec<Connection<I, A>>,
 }
 
 pub struct Connection<I, A> {

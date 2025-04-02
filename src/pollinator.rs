@@ -1,6 +1,4 @@
-use crate::*;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
 use treeclocks::{EventTree, ItcMap};
 
 mod identity_map;
@@ -20,11 +18,12 @@ pub trait Pollinator {
 
 pub trait PollinatorInner {}
 
+#[allow(dead_code)]
 pub(crate) struct PollinatorCore {
     timestamp: EventTree,
     reality_token: RealityToken,
     logic: Box<dyn PollinatorInner>,
-    peerInfo: ItcMap<PeerInfo>,
+    peer_info: ItcMap<PeerInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

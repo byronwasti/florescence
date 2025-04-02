@@ -7,7 +7,6 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender, error::TryRecv
 use tokio_stream::{Stream, StreamExt, wrappers::UnboundedReceiverStream};
 use tonic::{Request, Response, Status, Streaming, transport::Server};
 use tracing::{debug, error};
-use uuid::Uuid;
 
 mod codec;
 mod rpc;
@@ -136,7 +135,7 @@ where
     fn start(&mut self) {
         let gossiper = Handler::new(self.new_conn_tx.take().expect("start called twice."));
 
-        let socket_addr = self.socket_addr.clone();
+        let socket_addr = self.socket_addr;
         tokio::task::spawn(async move {
             Server::builder()
                 .add_service(GossipServer::new(gossiper))
@@ -168,7 +167,7 @@ where
     type GossipStream = ResponseStream;
     async fn gossip(
         &self,
-        mut request: Request<Streaming<TonicReqWrapper>>,
+        request: Request<Streaming<TonicReqWrapper>>,
     ) -> Result<Response<ResponseStream>, Status> {
         // TODO: This must be coordinated with the EngineCore
         let (tx0, rx0) = mpsc::unbounded_channel();
@@ -202,7 +201,7 @@ where
                             error!("Unable to deserialize the request");
                         }
                     }
-                    Err(err) => {
+                    Err(_err) => {
                         todo!()
                     }
                 }

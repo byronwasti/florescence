@@ -1,16 +1,15 @@
 use crate::engine::{Connection, Engine};
-use crate::pollinator::{Pollinator, RealityToken};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::marker::PhantomData;
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::task::JoinHandle;
-use treeclocks::{EventTree, ItcMap, itc_map::UpdatePacket};
+use treeclocks::ItcMap;
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 struct Topic(String);
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub(crate) struct PeerInfo<I, A> {
     id: I,
     addr: A,
@@ -30,12 +29,13 @@ impl<I> FlowerHandle<I> {
     }
     */
 
-    pub async fn runtime(mut self) -> anyhow::Result<()> {
+    pub async fn runtime(self) -> anyhow::Result<()> {
         self.handle.await??;
         Ok(())
     }
 }
 
+#[allow(dead_code)]
 pub struct Flower<I, E: Engine<I>> {
     id: I,
     engine: E,
@@ -89,7 +89,7 @@ where
         self
     }
 
-    pub fn bloom(mut self) -> anyhow::Result<FlowerHandle<I>> {
+    pub fn bloom(self) -> anyhow::Result<FlowerHandle<I>> {
         let mut engine = self.engine.expect("No engine");
         engine.start();
 

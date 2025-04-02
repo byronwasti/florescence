@@ -5,22 +5,22 @@ pub struct IdentityMap<T> {
 }
 
 impl<T> IdentityMap<T> {
-    fn set(&mut self, value: T) {
+    pub fn set(&mut self, _value: T) {
         todo!()
     }
 
-    fn get(&self) -> T {
-        todo!()
+    pub fn get(&self) -> &T {
+        &self.t
     }
 
-    fn fold<B, F>(&self, init: B, f: F) -> B
+    pub fn fold<B, F>(&self, _init: B, _f: F) -> B
     where
         F: FnMut(B, T) -> B,
     {
         todo!()
     }
 
-    fn apply<F>(&self, f: F) -> T
+    pub fn apply<F>(&self, _f: F) -> T
     where
         F: FnMut(T) -> T,
     {

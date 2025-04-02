@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use florescence::{Flower, engine::TonicEngine, pollinator::IdentityMap};
+use florescence::{Flower, engine::TonicEngine};
 use http::Uri;
 use std::net::SocketAddr;
 use uuid::Uuid;
