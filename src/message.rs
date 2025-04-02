@@ -3,25 +3,25 @@ use serde::{Deserialize, Serialize};
 use treeclocks::{EventTree, IdTree};
 
 #[derive(Serialize, Deserialize)]
-pub struct PollinationMessage<T, I, A> {
+pub struct PollinationMessage<I, A> {
     id: I,
     addr: A,
     topic: String,
     timestamp: EventTree,
     reality_token: RealityToken,
-    kind: PollinationMessageKind<T, I, A>,
+    kind: PollinationMessageKind<I, A>,
 }
 
 #[derive(Serialize, Deserialize)]
-enum PollinationMessageKind<T, I, A> {
+enum PollinationMessageKind<I, A> {
     Heartbeat,
     RequestFork,
-    Update(UpdatePacket<T>),
+    Update(UpdatePacket),
     RealitySkew {
         ids: Vec<(I, A)>,
     },
     Seed {
         itc_id: IdTree,
-        update: UpdatePacket<T>,
+        update: UpdatePacket,
     },
 }

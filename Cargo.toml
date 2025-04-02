@@ -29,9 +29,13 @@ tonic = { version="0.12.3" }
 tower-service = "0.3.3"
 treeclocks = { version="0.4.2", path="../treeclocks", features = ["serde"] }
 tonic-build = "0.12.3"
-uuid = { version="1.16.0", features = ["serde"] }
+uuid = { version = "1.16.0", features = ["serde", "v4"] }
 tracing = "0.1.41"
 http-serde = "2.1.1"
+anyhow = "1.0.97"
+
+[dev-dependencies]
+clap = { version = "4.5.35", features = ["derive"] }
 
 [build-dependencies]
 tonic-build = "0.12.3"

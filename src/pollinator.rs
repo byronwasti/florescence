@@ -1,4 +1,3 @@
-use crate::engine::EngineConnection;
 use crate::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -14,7 +13,7 @@ pub struct PeerInfo {}
 
 pub trait Pollinator {
     type A: PollinatorInner + Sized;
-    fn from_conn(conn: EngineConnection) -> (Self, Self::A)
+    fn from_conn() -> (Self, Self::A)
     where
         Self: Sized;
 }
@@ -29,6 +28,6 @@ pub(crate) struct PollinatorCore {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct UpdatePacket<T> {
-    inner: T,
+pub(crate) struct UpdatePacket {
+    inner: u32,
 }

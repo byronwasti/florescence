@@ -1,9 +1,7 @@
 use super::{Pollinator, PollinatorInner};
-use crate::engine::EngineConnection;
 
 pub struct IdentityMap<T> {
     t: T,
-    conn: EngineConnection,
 }
 
 impl<T> IdentityMap<T> {
@@ -35,7 +33,7 @@ impl<T> PollinatorInner for IdentityMap<T> {}
 impl<T> Pollinator for IdentityMap<T> {
     type A = IdentityMap<T>;
 
-    fn from_conn(conn: EngineConnection) -> (Self, Self::A) {
+    fn from_conn() -> (Self, Self::A) {
         todo!()
     }
 }
