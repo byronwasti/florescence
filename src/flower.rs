@@ -1,8 +1,13 @@
 use crate::engine::{Connection, Engine};
+use crate::message::PollinationMessage;
+use crate::reality_token::RealityToken;
 use std::collections::HashSet;
+use std::hash::Hash;
 use std::marker::PhantomData;
+use std::time::Duration;
 use tokio::task::JoinHandle;
-use treeclocks::ItcMap;
+use tokio::time::{MissedTickBehavior, interval};
+use treeclocks::{EventTree, IdTree, ItcMap};
 
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
@@ -38,13 +43,20 @@ impl<I> FlowerHandle<I> {
 #[allow(dead_code)]
 pub struct Flower<I, E: Engine<I>> {
     id: I,
+    itc_id: IdTree,
+    timestamp: EventTree,
+    reality_token: RealityToken,
     engine: E,
     seed_list: Vec<E::Addr>,
     peer_info: ItcMap<PeerInfo<I, E::Addr>>,
-    conns: Vec<Connection<I, E::Addr>>,
+    conns: Vec<Connection<I>>,
 }
 
-impl<I, E: Engine<I>> Flower<I, E> {
+impl<I, E> Flower<I, E>
+where
+    E: Engine<I>,
+    I: Clone,
+{
     pub fn builder() -> FlowerBuilder<I, E> {
         FlowerBuilder::default()
     }
@@ -56,8 +68,23 @@ impl<I, E: Engine<I>> Flower<I, E> {
                 self.conns.push(conn);
             }
         }
+
+        let mut interval = interval(Duration::from_millis(100));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
-            todo!()
+            tokio::select! {
+                _ = interval.tick() => {
+                    for conn in &mut self.conns {
+                        // TODO: Handle error
+                        let _ = conn.tx.send(PollinationMessage::Heartbeat {
+                            id: self.id.clone(),
+                            itc_id: self.itc_id.clone(),
+                            timestamp: self.timestamp.clone(),
+                            reality_token: self.reality_token,
+                        });
+                    }
+                }
+            }
         }
     }
 }
@@ -71,7 +98,7 @@ pub struct FlowerBuilder<I, E: Engine<I>> {
 impl<I, E> FlowerBuilder<I, E>
 where
     E: Engine<I> + 'static,
-    I: Clone + Send + 'static,
+    I: Clone + Send + Hash + 'static,
     E::Addr: Clone + Send,
 {
     pub fn id(mut self, id: I) -> Self {
@@ -93,8 +120,16 @@ where
         let mut engine = self.engine.expect("No engine");
         engine.start();
 
+        let id = self.id.expect("no id provided");
+        let itc_id = IdTree::One;
+        let timestamp = EventTree::new();
+        let timestamp = timestamp.event(&itc_id);
+
         let flower = Flower {
-            id: self.id.expect("no id provided"),
+            reality_token: RealityToken::new(&id),
+            id,
+            itc_id,
+            timestamp,
             engine,
             seed_list: self.seed_list,
             peer_info: ItcMap::new(),

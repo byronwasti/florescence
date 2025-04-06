@@ -1,3 +1,4 @@
+use crate::reality_token::RealityToken;
 use serde::{Deserialize, Serialize};
 use treeclocks::{EventTree, ItcMap};
 
@@ -5,8 +6,6 @@ mod identity_map;
 
 pub use identity_map::IdentityMap;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RealityToken(u64);
 pub struct PeerInfo {}
 
 pub trait Pollinator {
@@ -27,6 +26,6 @@ pub(crate) struct PollinatorCore {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct UpdatePacket {
+pub struct Patch {
     inner: u32,
 }

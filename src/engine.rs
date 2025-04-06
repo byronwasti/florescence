@@ -13,20 +13,20 @@ pub trait Engine<I>: Send {
 
     fn addr(&self) -> &Self::Addr;
 
-    fn create_conn(&mut self, addr: Self::Addr) -> Connection<I, Self::Addr>;
+    fn create_conn(&mut self, addr: Self::Addr) -> Connection<I>;
 
-    fn get_new_conns(&mut self) -> Vec<Connection<I, Self::Addr>>;
+    fn get_new_conns(&mut self) -> Vec<Connection<I>>;
 }
 
-pub struct Connection<I, A> {
-    pub tx: UnboundedSender<PollinationMessage<I, A>>,
-    pub rx: UnboundedReceiver<PollinationMessage<I, A>>,
+pub struct Connection<I> {
+    pub tx: UnboundedSender<PollinationMessage<I>>,
+    pub rx: UnboundedReceiver<PollinationMessage<I>>,
 }
 
-impl<I, A> Connection<I, A> {
+impl<I> Connection<I> {
     pub fn new(
-        tx: UnboundedSender<PollinationMessage<I, A>>,
-        rx: UnboundedReceiver<PollinationMessage<I, A>>,
+        tx: UnboundedSender<PollinationMessage<I>>,
+        rx: UnboundedReceiver<PollinationMessage<I>>,
     ) -> Self {
         Self { tx, rx }
     }

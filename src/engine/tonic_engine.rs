@@ -45,8 +45,8 @@ impl FromStr for Uri {
 pub struct TonicEngine<I> {
     socket_addr: SocketAddr,
     addr: Uri,
-    new_conn_tx: Option<UnboundedSender<Connection<I, Uri>>>,
-    new_conn_rx: UnboundedReceiver<Connection<I, Uri>>,
+    new_conn_tx: Option<UnboundedSender<Connection<I>>>,
+    new_conn_rx: UnboundedReceiver<Connection<I>>,
 }
 
 impl<I> TonicEngine<I> {
@@ -73,19 +73,18 @@ where
         &self.addr
     }
 
-    fn create_conn(&mut self, addr: Uri) -> Connection<I, Self::Addr> {
+    fn create_conn(&mut self, addr: Uri) -> Connection<I> {
         let (tx0, rx0) = mpsc::unbounded_channel();
         let (tx1, rx1) = mpsc::unbounded_channel();
         tokio::task::spawn(async move {
             // TODO: Deal with failure
             let mut client = GossipClient::connect(addr.clone().uri).await.unwrap();
 
-            let in_stream = UnboundedReceiverStream::new(rx0).map(|x: PollinationMessage<_, _>| {
-                TonicReqWrapper {
+            let in_stream =
+                UnboundedReceiverStream::new(rx0).map(|x: PollinationMessage<_>| TonicReqWrapper {
                     raw: bincode::serde::encode_to_vec(x, bincode::config::standard())
                         .expect("Unable to serialize message"),
-                }
-            });
+                });
             // TODO: Deal with failure
             let res = client.gossip(in_stream).await.unwrap();
 
@@ -120,7 +119,7 @@ where
         Connection { tx: tx0, rx: rx1 }
     }
 
-    fn get_new_conns(&mut self) -> Vec<Connection<I, Self::Addr>> {
+    fn get_new_conns(&mut self) -> Vec<Connection<I>> {
         let mut new_conns = vec![];
         loop {
             match self.new_conn_rx.try_recv() {
@@ -146,12 +145,12 @@ where
     }
 }
 
-struct Handler<I, A> {
-    tx: UnboundedSender<Connection<I, A>>,
+struct Handler<I> {
+    tx: UnboundedSender<Connection<I>>,
 }
 
-impl<I, A> Handler<I, A> {
-    pub fn new(tx: UnboundedSender<Connection<I, A>>) -> Self {
+impl<I> Handler<I> {
+    pub fn new(tx: UnboundedSender<Connection<I>>) -> Self {
         Self { tx }
     }
 }
@@ -159,10 +158,9 @@ impl<I, A> Handler<I, A> {
 type ResponseStream = Pin<Box<dyn Stream<Item = Result<TonicReqWrapper, Status>> + Send>>;
 
 #[tonic::async_trait]
-impl<I, A> Gossip for Handler<I, A>
+impl<I> Gossip for Handler<I>
 where
     I: Send + Sync + 'static + Serialize + for<'a> Deserialize<'a>,
-    A: Send + Sync + 'static + Serialize + for<'a> Deserialize<'a>,
 {
     type GossipStream = ResponseStream;
     async fn gossip(
@@ -208,7 +206,7 @@ where
             }
         });
 
-        let out_stream = UnboundedReceiverStream::new(rx0).map(|x: PollinationMessage<_, _>| {
+        let out_stream = UnboundedReceiverStream::new(rx0).map(|x: PollinationMessage<_>| {
             Ok(TonicReqWrapper {
                 raw: bincode::serde::encode_to_vec(x, bincode::config::standard())
                     .expect("Unable to serialize message"),

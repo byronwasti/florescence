@@ -29,6 +29,6 @@ async fn main() -> Result<()> {
 
     //let p0 = flower.stream_pollinator::<IdentityMap<u32>>();
 
-    flower.runtime().await;
+    flower.runtime().await?;
     Ok(())
 }
