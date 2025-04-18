@@ -54,6 +54,7 @@ pub struct Flower<E: Engine> {
     engine: E,
     seed_list: Vec<E::Addr>,
     core_map: ItcMap<PeerInfo<E::Addr>>,
+    //conn_state: Vec<ConnectionState>,
     txs: Vec<Sender<PollinationMessage>>,
     rxs: Vec<Receiver<PollinationMessage>>,
 }
@@ -95,6 +96,7 @@ impl Propagativity {
                     *self = Propagativity::Resting(id, Instant::now());
                     Some(peer_id)
                 } else {
+                    *self = Propagativity::Resting(id, timeout);
                     None
                 }
             }
@@ -216,7 +218,11 @@ where
             } => self.handle_reality_skew(idx, id, timestamp, reality_token, patch, peer_count),
             PollinationMessage::NewMember {} => {
                 if let Some(peer_id) = self.propagativity.propagate() {
-                    self.core_map.event(self.propagativity.id().unwrap());
+                    let id = self.propagativity.id().unwrap();
+                    self.core_map.insert(
+                        id.clone(),
+                        PeerInfo::new(id.clone(), self.engine.addr().clone()),
+                    );
                     self.msg_seed(peer_id)
                 } else {
                     self.msg_see_other()
@@ -234,7 +240,10 @@ where
                     Ok(patch) => {
                         self.core_map = ItcMap::new();
                         self.core_map.apply(patch);
-                        self.core_map.event(&new_id);
+                        self.core_map.insert(
+                            new_id.clone(),
+                            PeerInfo::new(new_id.clone(), self.engine.addr().clone()),
+                        );
                         self.propagativity = Propagativity::Resting(new_id, Instant::now());
                         self.reality_token = reality_token;
                     }

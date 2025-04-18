@@ -92,7 +92,7 @@ impl std::fmt::Display for PollinationMessage {
                 reality_token,
                 patch,
             } => {
-                write!(f, "HB - {id} - {timestamp} - {reality_token} - {patch}")
+                write!(f, "UP - {id} - {timestamp} - {reality_token} - {patch}")
             }
             RealitySkew {
                 id,
