@@ -1,10 +1,12 @@
+use crate::constants::MPSC_CHANNEL_SIZE;
 use crate::message::PollinationMessage;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::str::FromStr;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender, error::TryRecvError};
-use tokio_stream::{Stream, StreamExt, wrappers::UnboundedReceiverStream};
+use std::time::Duration;
+use tokio::sync::mpsc::{self, Receiver, Sender, error::TryRecvError};
+use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status, Streaming, transport::Server};
 use tracing::{debug, error};
 
@@ -42,18 +44,18 @@ impl FromStr for Uri {
 }
 
 /// Streaming RPC via Tonic library
-pub struct TonicEngine<I> {
+pub struct TonicEngine {
     socket_addr: SocketAddr,
     addr: Uri,
-    new_conn_tx: Option<UnboundedSender<Connection<I>>>,
-    new_conn_rx: UnboundedReceiver<Connection<I>>,
+    new_conn_tx: Option<Sender<Connection>>,
+    new_conn_rx: Receiver<Connection>,
 }
 
-impl<I> TonicEngine<I> {
+impl TonicEngine {
     /// `socket_addr` is the connection on the server side
     /// `addr` is the address clients use
     pub fn new(socket_addr: SocketAddr, addr: http::Uri) -> Self {
-        let (new_conn_tx, new_conn_rx) = mpsc::unbounded_channel();
+        let (new_conn_tx, new_conn_rx) = mpsc::channel(MPSC_CHANNEL_SIZE);
         Self {
             socket_addr,
             addr: Uri { uri: addr },
@@ -63,28 +65,30 @@ impl<I> TonicEngine<I> {
     }
 }
 
-impl<I> Engine<I> for TonicEngine<I>
-where
-    I: Send + Sync + 'static + Serialize + for<'a> Deserialize<'a>,
-{
+impl Engine for TonicEngine {
     type Addr = Uri;
 
     fn addr(&self) -> &Self::Addr {
         &self.addr
     }
 
-    fn create_conn(&mut self, addr: Uri) -> Connection<I> {
-        let (tx0, rx0) = mpsc::unbounded_channel();
-        let (tx1, rx1) = mpsc::unbounded_channel();
+    fn create_conn(&mut self, addr: Uri) -> Connection {
+        let (tx0, rx0) = mpsc::channel(MPSC_CHANNEL_SIZE);
+        let (tx1, rx1) = mpsc::channel(MPSC_CHANNEL_SIZE);
         tokio::task::spawn(async move {
             // TODO: Deal with failure
-            let mut client = GossipClient::connect(addr.clone().uri).await.unwrap();
+            let mut client = loop {
+                if let Ok(client) = GossipClient::connect(addr.clone().uri).await {
+                    break client;
+                } else {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            };
 
-            let in_stream =
-                UnboundedReceiverStream::new(rx0).map(|x: PollinationMessage<_>| TonicReqWrapper {
-                    raw: bincode::serde::encode_to_vec(x, bincode::config::standard())
-                        .expect("Unable to serialize message"),
-                });
+            let in_stream = ReceiverStream::new(rx0).map(|x: PollinationMessage| TonicReqWrapper {
+                raw: bincode::serde::encode_to_vec(x, bincode::config::standard())
+                    .expect("Unable to serialize message"),
+            });
             // TODO: Deal with failure
             let res = client.gossip(in_stream).await.unwrap();
 
@@ -96,7 +100,7 @@ where
                         if let Ok((val, _)) =
                             bincode::serde::decode_from_slice(&val.raw, bincode::config::standard())
                         {
-                            if let Err(err) = tx1.send(val) {
+                            if let Err(err) = tx1.try_send(val) {
                                 debug!("Internal mpsc errored: {err}");
                                 break;
                             }
@@ -116,10 +120,10 @@ where
             }
         });
 
-        Connection { tx: tx0, rx: rx1 }
+        (tx0, rx1)
     }
 
-    fn get_new_conns(&mut self) -> Vec<Connection<I>> {
+    fn get_new_conns(&mut self) -> Vec<Connection> {
         let mut new_conns = vec![];
         loop {
             match self.new_conn_rx.try_recv() {
@@ -145,12 +149,12 @@ where
     }
 }
 
-struct Handler<I> {
-    tx: UnboundedSender<Connection<I>>,
+struct Handler {
+    tx: Sender<Connection>,
 }
 
-impl<I> Handler<I> {
-    pub fn new(tx: UnboundedSender<Connection<I>>) -> Self {
+impl Handler {
+    pub fn new(tx: Sender<Connection>) -> Self {
         Self { tx }
     }
 }
@@ -158,20 +162,17 @@ impl<I> Handler<I> {
 type ResponseStream = Pin<Box<dyn Stream<Item = Result<TonicReqWrapper, Status>> + Send>>;
 
 #[tonic::async_trait]
-impl<I> Gossip for Handler<I>
-where
-    I: Send + Sync + 'static + Serialize + for<'a> Deserialize<'a>,
-{
+impl Gossip for Handler {
     type GossipStream = ResponseStream;
     async fn gossip(
         &self,
         request: Request<Streaming<TonicReqWrapper>>,
     ) -> Result<Response<ResponseStream>, Status> {
         // TODO: This must be coordinated with the EngineCore
-        let (tx0, rx0) = mpsc::unbounded_channel();
-        let (tx1, rx1) = mpsc::unbounded_channel();
+        let (tx0, rx0) = mpsc::channel(MPSC_CHANNEL_SIZE);
+        let (tx1, rx1) = mpsc::channel(MPSC_CHANNEL_SIZE);
 
-        if let Err(err) = self.tx.send(Connection::new(tx0, rx1)) {
+        if let Err(err) = self.tx.try_send((tx0, rx1)) {
             error!("New connection rx is closed: {err}");
             panic!("New connection rx is closed");
         }
@@ -190,7 +191,7 @@ where
                         if let Ok((val, _)) =
                             bincode::serde::decode_from_slice(&val.raw, bincode::config::standard())
                         {
-                            if let Err(err) = tx1.send(val) {
+                            if let Err(err) = tx1.try_send(val) {
                                 debug!("Internal mpsc errored: {err}");
                                 break;
                             }
@@ -199,14 +200,14 @@ where
                             error!("Unable to deserialize the request");
                         }
                     }
-                    Err(_err) => {
-                        todo!()
+                    Err(err) => {
+                        error!("gRPC Status: {err}");
                     }
                 }
             }
         });
 
-        let out_stream = UnboundedReceiverStream::new(rx0).map(|x: PollinationMessage<_>| {
+        let out_stream = ReceiverStream::new(rx0).map(|x: PollinationMessage| {
             Ok(TonicReqWrapper {
                 raw: bincode::serde::encode_to_vec(x, bincode::config::standard())
                     .expect("Unable to serialize message"),

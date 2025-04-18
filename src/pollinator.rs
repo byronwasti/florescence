@@ -1,5 +1,4 @@
 use crate::reality_token::RealityToken;
-use serde::{Deserialize, Serialize};
 use treeclocks::{EventTree, ItcMap};
 
 mod identity_map;
@@ -23,9 +22,4 @@ pub(crate) struct PollinatorCore {
     reality_token: RealityToken,
     logic: Box<dyn PollinatorInner>,
     peer_info: ItcMap<PeerInfo>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Patch {
-    inner: u32,
 }

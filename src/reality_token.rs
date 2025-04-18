@@ -1,14 +1,14 @@
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RealityToken(u64);
 
 impl RealityToken {
-    pub fn new<I: Hash>(id: &I) -> Self {
-        let mut s = DefaultHasher::new();
-        id.hash(&mut s);
-        Self(!s.finish())
+    pub fn new() -> Self {
+        let mut rng = rand::rng();
+        Self(rng.random::<u64>())
     }
 
     pub fn increment<I: Hash>(&mut self, id: I) {
@@ -19,5 +19,11 @@ impl RealityToken {
 
     pub fn get(&self) -> u64 {
         self.0
+    }
+}
+
+impl std::fmt::Display for RealityToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.0)
     }
 }
