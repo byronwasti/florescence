@@ -1,10 +1,13 @@
+use crate::connection::Connection;
 use crate::constants;
-use crate::engine::{Connection, Engine};
+use crate::ds::StableVec;
+use crate::engine::Engine;
 use crate::message::{Patch, PollinationMessage};
 use crate::reality_token::RealityToken;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::hash::Hash;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::{JoinHandle, JoinSet};
@@ -54,8 +57,7 @@ pub struct Flower<E: Engine> {
     engine: E,
     seed_list: Vec<E::Addr>,
     core_map: ItcMap<PeerInfo<E::Addr>>,
-    //conn_state: Vec<ConnectionState>,
-    txs: Vec<Sender<PollinationMessage>>,
+    conns: StableVec<Connection>,
     rxs: Vec<Receiver<PollinationMessage>>,
 }
 
@@ -108,7 +110,7 @@ impl Propagativity {
 impl<E> Flower<E>
 where
     E: Engine,
-    E::Addr: Clone + Serialize + for<'de> Deserialize<'de>,
+    E::Addr: Clone + Serialize + for<'de> Deserialize<'de> + Hash,
 {
     pub fn builder() -> FlowerBuilder<E> {
         FlowerBuilder::default()
@@ -123,9 +125,9 @@ where
 
         for addr in self.seed_list.drain(..) {
             if addr != *self.engine.addr() {
-                let (tx, rx) = self.engine.create_conn(addr);
-                self.txs.push(tx);
-                self.rxs.push(rx);
+                let mut conn = self.engine.create_conn(addr);
+                self.rxs.push(conn.take_rx().unwrap());
+                self.conns.push(conn);
             }
         }
 
@@ -151,21 +153,27 @@ where
                         self.core_map.event(id);
                     }
 
-                    let mut conns = self.engine.get_new_conns();
-                    for (tx, mut rx) in conns.drain(..) {
-                        self.txs.push(tx);
-                        let idx = self.txs.len() - 1;
-                        set.spawn(async move {
-                            let msg = rx.recv().await;
-                            (rx, idx, msg)
-                        });
-                    }
-
-
                     // TODO: Handle error
                     if let Some(msg) = self.msg_heartbeat() {
                         debug!("o b {msg}");
                         let _ = self.broadcast(msg).await;
+                    }
+                }
+
+                new_conn = self.engine.get_new_conn() => {
+                    //if let Some((tx, mut rx)) = new_conn {
+                    if let Some(mut conn) = new_conn {
+                        let mut rx = conn.take_rx().unwrap();
+                        let idx = self.conns.push(conn);
+                        set.spawn(async move {
+                            let msg = rx.recv().await;
+                            (rx, idx, msg)
+                        });
+                    } else {
+                        error!("Engine stopped working.");
+
+                        // TODO: No panic
+                        panic!("Engine stopped working.");
                     }
                 }
 
@@ -272,8 +280,9 @@ where
 
         if let Some(msg) = msg {
             debug!("o {idx}: {msg}");
-            let tx = &self.txs[idx];
-            tx.send(msg).await;
+            // TODO: Handle errors
+            let conn = self.conns.get(idx).unwrap();
+            conn.tx().send(msg).await;
         }
     }
 
@@ -459,8 +468,8 @@ where
     }
 
     async fn broadcast(&self, message: PollinationMessage) -> anyhow::Result<()> {
-        for tx in &self.txs {
-            tx.send(message.clone()).await?;
+        for conn in self.conns.iter() {
+            conn.tx().send(message.clone()).await?;
         }
 
         Ok(())
@@ -475,7 +484,7 @@ pub struct FlowerBuilder<E: Engine> {
 impl<E> FlowerBuilder<E>
 where
     E: Engine + 'static + Send + Sync,
-    E::Addr: Send + Sync + Clone + Serialize + for<'de> Deserialize<'de>,
+    E::Addr: Send + Sync + Clone + Serialize + for<'de> Deserialize<'de> + Hash,
 {
     pub fn engine(mut self, engine: E) -> Self {
         self.engine = Some(engine);
@@ -499,7 +508,7 @@ where
             engine,
             seed_list: self.seed_list,
             core_map: ItcMap::new(),
-            txs: vec![],
+            conns: StableVec::new(),
             rxs: vec![],
         };
 

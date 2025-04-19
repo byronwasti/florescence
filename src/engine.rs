@@ -1,6 +1,7 @@
+use crate::connection::Connection;
+
 mod tonic_engine;
-use crate::message::PollinationMessage;
-use tokio::sync::mpsc::{Receiver, Sender};
+
 pub use tonic_engine::TonicEngine;
 
 pub trait Engine: Send {
@@ -15,7 +16,5 @@ pub trait Engine: Send {
 
     fn create_conn(&mut self, addr: Self::Addr) -> Connection;
 
-    fn get_new_conns(&mut self) -> Vec<Connection>;
+    fn get_new_conn(&mut self) -> impl Future<Output = Option<Connection>> + Send;
 }
-
-pub type Connection = (Sender<PollinationMessage>, Receiver<PollinationMessage>);

@@ -2,7 +2,7 @@ use crate::reality_token::RealityToken;
 use serde::{Deserialize, Serialize};
 use treeclocks::{EventTree, IdTree};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Patch {
     inner: Vec<u8>,
 }
@@ -71,6 +71,28 @@ pub enum PollinationMessage {
         reality_token: RealityToken,
         patch: Patch,
     },
+}
+
+impl PollinationMessage {
+    pub fn light_clone(&self) -> Self {
+        let mut new = self.clone();
+        // Assuming the compiler will optimize away the clone
+        new.delete_patch();
+        new
+    }
+
+    fn delete_patch(&mut self) {
+        use PollinationMessage::*;
+        match self {
+            Heartbeat { .. } | NewMember {} => {}
+            Update { patch, .. }
+            | RealitySkew { patch, .. }
+            | SeeOther { patch, .. }
+            | Seed { patch, .. } => {
+                let _ = std::mem::take(patch);
+            }
+        }
+    }
 }
 
 impl std::fmt::Display for PollinationMessage {

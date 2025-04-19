@@ -120,19 +120,11 @@ impl Engine for TonicEngine {
             }
         });
 
-        (tx0, rx1)
+        Connection::new(tx0, rx1)
     }
 
-    fn get_new_conns(&mut self) -> Vec<Connection> {
-        let mut new_conns = vec![];
-        loop {
-            match self.new_conn_rx.try_recv() {
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => panic!("New connection tx closed."),
-                Ok(val) => new_conns.push(val),
-            }
-        }
-        new_conns
+    fn get_new_conn(&mut self) -> impl Future<Output = Option<Connection>> {
+        async { self.new_conn_rx.recv().await }
     }
 
     fn start(&mut self) {
@@ -172,7 +164,7 @@ impl Gossip for Handler {
         let (tx0, rx0) = mpsc::channel(MPSC_CHANNEL_SIZE);
         let (tx1, rx1) = mpsc::channel(MPSC_CHANNEL_SIZE);
 
-        if let Err(err) = self.tx.try_send((tx0, rx1)) {
+        if let Err(err) = self.tx.send(Connection::new(tx0, rx1)).await {
             error!("New connection rx is closed: {err}");
             panic!("New connection rx is closed");
         }
@@ -191,7 +183,7 @@ impl Gossip for Handler {
                         if let Ok((val, _)) =
                             bincode::serde::decode_from_slice(&val.raw, bincode::config::standard())
                         {
-                            if let Err(err) = tx1.try_send(val) {
+                            if let Err(err) = tx1.send(val).await {
                                 debug!("Internal mpsc errored: {err}");
                                 break;
                             }
