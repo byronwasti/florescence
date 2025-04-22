@@ -74,6 +74,17 @@ pub enum PollinationMessage {
 }
 
 impl PollinationMessage {
+    pub fn timestamp(&self) -> Option<&EventTree> {
+        use PollinationMessage::*;
+        match self {
+            NewMember {} => None,
+            Heartbeat { timestamp, .. }
+            | Update { timestamp, .. }
+            | RealitySkew { timestamp, .. }
+            | SeeOther { timestamp, .. }
+            | Seed { timestamp, .. } => Some(&timestamp),
+        }
+    }
     pub fn light_clone(&self) -> Self {
         let mut new = self.clone();
         // Assuming the compiler will optimize away the clone

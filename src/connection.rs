@@ -1,10 +1,12 @@
+use crate::constants;
 use crate::message::PollinationMessage;
-use tokio::sync::mpsc::{Receiver, Sender};
+use std::time::Instant;
+use tokio::sync::mpsc::{Receiver, Sender, error::SendError};
+use tracing::debug;
 
-//pub type Connection = (Sender<PollinationMessage>, Receiver<PollinationMessage>);
-
+#[derive(Debug)]
 pub struct Connection {
-    prev_msg: Option<PollinationMessage>,
+    pub(crate) prev_msg: Option<(PollinationMessage, Instant)>,
     tx: Sender<PollinationMessage>,
     rx: Option<Receiver<PollinationMessage>>,
 }
@@ -22,7 +24,55 @@ impl Connection {
         self.rx.take()
     }
 
-    pub fn tx(&self) -> &Sender<PollinationMessage> {
-        &self.tx
+    pub async fn send(
+        &mut self,
+        msg: PollinationMessage,
+    ) -> Result<(), SendError<PollinationMessage>> {
+        if self.debounce(&msg) {
+            return Ok(());
+        }
+
+        self.prev_msg = Some((msg.light_clone(), Instant::now()));
+        self.tx.send(msg).await
+    }
+
+    fn debounce(&self, msg: &PollinationMessage) -> bool {
+        if let Some((prev_msg, timeout)) = &self.prev_msg {
+            if timeout.elapsed() > constants::DEBOUNCE_TIMEOUT {
+                return false;
+            }
+
+            use PollinationMessage::*;
+            match (&prev_msg, msg) {
+                (
+                    Heartbeat {
+                        timestamp: ts_old, ..
+                    }
+                    | Update {
+                        timestamp: ts_old, ..
+                    },
+                    Heartbeat {
+                        timestamp: ts_new, ..
+                    },
+                ) if ts_new <= ts_old => {
+                    debug!("Skipping heartbeat since one already sent");
+                    true
+                }
+                (
+                    Update {
+                        timestamp: ts_old, ..
+                    },
+                    Update {
+                        timestamp: ts_new, ..
+                    },
+                ) if ts_new <= ts_old => {
+                    debug!("Skipping update since one already sent");
+                    true
+                }
+                _ => false,
+            }
+        } else {
+            false
+        }
     }
 }

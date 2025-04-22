@@ -19,7 +19,7 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
     FmtSubscriber::builder()
-        .with_env_filter("florescence=debug")
+        .with_env_filter("florescence=debug,treeclocks=trace")
         .with_line_number(true)
         //.with_max_level(tracing::Level::DEBUG)
         .init();

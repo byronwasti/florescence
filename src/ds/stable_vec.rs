@@ -1,3 +1,4 @@
+#[derive(Debug, Clone)]
 pub struct StableVec<T> {
     inner: Vec<Option<T>>,
 }
@@ -21,7 +22,15 @@ impl<T> StableVec<T> {
         self.inner.get(index).map(|x| x.as_ref()).flatten()
     }
 
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        self.inner.get_mut(index).map(|x| x.as_mut()).flatten()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.inner.iter().filter_map(|x| x.as_ref())
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.inner.iter_mut().filter_map(|x| x.as_mut())
     }
 }

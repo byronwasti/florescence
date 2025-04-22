@@ -7,48 +7,26 @@ use crate::reality_token::RealityToken;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::fmt::{self, Debug};
 use std::hash::Hash;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{MissedTickBehavior, interval};
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 use treeclocks::{EventTree, IdTree, ItcMap};
+
+mod handle;
+mod peer_info;
+mod propagativity;
+
+use handle::*;
+use peer_info::*;
+use propagativity::*;
 
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 struct Topic(String);
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct PeerInfo<A> {
-    id: IdTree,
-    addr: A,
-    // topics: Vec<Topic>,
-}
-
-impl<A> PeerInfo<A> {
-    pub(crate) fn new(id: IdTree, addr: A) -> Self {
-        Self { id, addr }
-    }
-}
-
-pub struct FlowerHandle {
-    handle: JoinHandle<anyhow::Result<()>>,
-}
-
-impl FlowerHandle {
-    /*
-    pub fn pollinator<P: Pollinator + 'static>(&self, interval: Duration) -> P {
-        let (pollinator, inner) = P::from_conn(EngineConnection {});
-        pollinator
-    }
-    */
-
-    pub async fn runtime(self) -> anyhow::Result<()> {
-        self.handle.await??;
-        Ok(())
-    }
-}
 
 #[allow(dead_code)]
 pub struct Flower<E: Engine> {
@@ -58,59 +36,19 @@ pub struct Flower<E: Engine> {
     seed_list: Vec<E::Addr>,
     core_map: ItcMap<PeerInfo<E::Addr>>,
     conns: StableVec<Connection>,
-    rxs: Vec<Receiver<PollinationMessage>>,
+    receivers: JoinSet<ReceiverLoop>,
 }
 
-#[derive(Debug, Clone)]
-enum Propagativity {
-    Unknown,
-    Propagating(IdTree),
-    Resting(IdTree, Instant),
-}
-
-impl Default for Propagativity {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
-impl Propagativity {
-    fn id(&self) -> Option<&IdTree> {
-        use Propagativity::*;
-        match self {
-            Propagating(id) | Resting(id, _) => Some(id),
-            Unknown => None,
-        }
-    }
-
-    fn propagate(&mut self) -> Option<IdTree> {
-        use Propagativity::*;
-        let s = std::mem::take(self);
-        match s {
-            Propagating(id) => {
-                let (id, peer_id) = id.fork();
-                *self = Propagativity::Resting(id, Instant::now());
-                Some(peer_id)
-            }
-            Resting(id, timeout) => {
-                if timeout.elapsed() > constants::PROPAGATION_TIMEOUT {
-                    let (id, peer_id) = id.fork();
-                    *self = Propagativity::Resting(id, Instant::now());
-                    Some(peer_id)
-                } else {
-                    *self = Propagativity::Resting(id, timeout);
-                    None
-                }
-            }
-            Unknown => None,
-        }
-    }
-}
+type ReceiverLoop = (
+    Receiver<PollinationMessage>,
+    usize,
+    Option<PollinationMessage>,
+);
 
 impl<E> Flower<E>
 where
     E: Engine,
-    E::Addr: Clone + Serialize + for<'de> Deserialize<'de> + Hash,
+    E::Addr: Clone + Serialize + for<'de> Deserialize<'de> + Hash + fmt::Display,
 {
     pub fn builder() -> FlowerBuilder<E> {
         FlowerBuilder::default()
@@ -123,24 +61,18 @@ where
             PeerInfo::new(id.clone(), self.engine.addr().clone()),
         );
 
-        for addr in self.seed_list.drain(..) {
+        let mut seed_list = std::mem::take(&mut self.seed_list);
+        for addr in seed_list.drain(..) {
             if addr != *self.engine.addr() {
                 let mut conn = self.engine.create_conn(addr);
-                self.rxs.push(conn.take_rx().unwrap());
-                self.conns.push(conn);
+                let rx = conn.take_rx().unwrap();
+                let idx = self.conns.push(conn);
+                self.spawn_receiver_loop(idx, rx);
             }
         }
 
         let mut interval = interval(constants::TICK_TIME);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-        let mut set = JoinSet::new();
-        for (idx, mut rx) in self.rxs.drain(..).enumerate() {
-            set.spawn(async move {
-                let msg = rx.recv().await;
-                (rx, idx, msg)
-            });
-        }
 
         info!("Looping");
         loop {
@@ -165,7 +97,7 @@ where
                     if let Some(mut conn) = new_conn {
                         let mut rx = conn.take_rx().unwrap();
                         let idx = self.conns.push(conn);
-                        set.spawn(async move {
+                        self.receivers.spawn(async move {
                             let msg = rx.recv().await;
                             (rx, idx, msg)
                         });
@@ -177,15 +109,12 @@ where
                     }
                 }
 
-                res = set.join_next() => {
+                res = self.receivers.join_next() => {
                     match res {
                         Some(Ok((mut rx, idx, msg))) => {
                             if let Some(msg) = msg {
                                 self.handle_msg(idx, msg).await;
-                                set.spawn(async move {
-                                    let msg = rx.recv().await;
-                                    (rx, idx, msg)
-                                });
+                                self.spawn_receiver_loop(idx, rx);
                             } else {
                                 error!("Msg was None; connection closed");
                             }
@@ -224,65 +153,29 @@ where
                 patch,
                 peer_count,
             } => self.handle_reality_skew(idx, id, timestamp, reality_token, patch, peer_count),
-            PollinationMessage::NewMember {} => {
-                if let Some(peer_id) = self.propagativity.propagate() {
-                    let id = self.propagativity.id().unwrap();
-                    self.core_map.insert(
-                        id.clone(),
-                        PeerInfo::new(id.clone(), self.engine.addr().clone()),
-                    );
-                    self.msg_seed(peer_id)
-                } else {
-                    self.msg_see_other()
-                }
-            }
+            PollinationMessage::NewMember {} => self.handle_new_member(),
             PollinationMessage::Seed {
                 id,
                 timestamp,
                 reality_token,
                 patch,
                 new_id,
-            } => {
-                // TODO: handle error
-                match patch.downcast() {
-                    Ok(patch) => {
-                        self.core_map = ItcMap::new();
-                        self.core_map.apply(patch);
-                        self.core_map.insert(
-                            new_id.clone(),
-                            PeerInfo::new(new_id.clone(), self.engine.addr().clone()),
-                        );
-                        self.propagativity = Propagativity::Resting(new_id, Instant::now());
-                        self.reality_token = reality_token;
-                    }
-                    Err(err) => {
-                        error!("Error parsing patch: {err:?}");
-                    }
-                }
-
-                None
-            }
+            } => self.handle_seed(idx, id, timestamp, reality_token, patch, new_id),
             PollinationMessage::SeeOther {
                 id,
                 timestamp,
                 reality_token,
                 patch,
-            } => {
-                // TODO: handle error
-                let patch = patch.downcast().unwrap();
-                self.core_map = ItcMap::new();
-                self.core_map.apply(patch);
-                self.reality_token = reality_token;
-
-                None
-            }
+            } => self.handle_see_other(idx, id, timestamp, reality_token, patch),
         };
+
+        debug!("s {self}");
 
         if let Some(msg) = msg {
             debug!("o {idx}: {msg}");
             // TODO: Handle errors
-            let conn = self.conns.get(idx).unwrap();
-            conn.tx().send(msg).await;
+            let conn = self.conns.get_mut(idx).unwrap();
+            conn.send(msg).await;
         }
     }
 
@@ -402,6 +295,70 @@ where
         }
     }
 
+    fn handle_new_member(&mut self) -> Option<PollinationMessage> {
+        if let Some(peer_id) = self.propagativity.propagate() {
+            let id = self.propagativity.id().unwrap();
+            self.core_map.insert(
+                id.clone(),
+                PeerInfo::new(id.clone(), self.engine.addr().clone()),
+            );
+
+            self.msg_seed(peer_id)
+        } else {
+            self.msg_see_other()
+        }
+    }
+
+    fn handle_seed(
+        &mut self,
+        _idx: usize,
+        _peer_id: IdTree,
+        peer_ts: EventTree,
+        peer_rt: RealityToken,
+        patch: Patch,
+        new_id: IdTree,
+    ) -> Option<PollinationMessage> {
+        // TODO: handle error
+        match patch.downcast() {
+            Ok(patch) => {
+                self.core_map = ItcMap::new();
+                self.core_map.apply(patch);
+                self.core_map.insert(
+                    new_id.clone(),
+                    PeerInfo::new(new_id.clone(), self.engine.addr().clone()),
+                );
+                self.propagativity = Propagativity::Resting(new_id, Instant::now());
+                self.reality_token = peer_rt;
+
+                self.msg_heartbeat()
+            }
+            Err(err) => {
+                error!("Error parsing patch: {err:?}");
+                None
+            }
+        }
+    }
+
+    fn handle_see_other(
+        &mut self,
+        _idx: usize,
+        _peer_id: IdTree,
+        peer_ts: EventTree,
+        peer_rt: RealityToken,
+        patch: Patch,
+    ) -> Option<PollinationMessage> {
+        warn!("SeeOther not implemented.");
+        // TODO: Needs a rethink
+        /*
+        // TODO: handle error
+        let patch = patch.downcast().unwrap();
+        self.core_map = ItcMap::new();
+        self.core_map.apply(patch);
+        self.reality_token = peer_rt;
+        */
+        None
+    }
+
     fn msg_heartbeat(&self) -> Option<PollinationMessage> {
         let id = self.propagativity.id()?.clone();
         Some(PollinationMessage::Heartbeat {
@@ -467,12 +424,50 @@ where
         Patch::new(itc_patch).expect("Error serializing patch")
     }
 
-    async fn broadcast(&self, message: PollinationMessage) -> anyhow::Result<()> {
-        for conn in self.conns.iter() {
-            conn.tx().send(message.clone()).await?;
+    async fn broadcast(&mut self, message: PollinationMessage) -> anyhow::Result<()> {
+        for conn in self.conns.iter_mut() {
+            conn.send(message.clone()).await?;
         }
 
         Ok(())
+    }
+
+    fn spawn_receiver_loop(&mut self, idx: usize, mut rx: Receiver<PollinationMessage>) {
+        self.receivers.spawn(async move {
+            let msg = rx.recv().await;
+            (rx, idx, msg)
+        });
+    }
+}
+
+impl<E: Engine> fmt::Display for Flower<E>
+where
+    E::Addr: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        let conns = self
+            .conns
+            .iter()
+            .enumerate()
+            .map(|(idx, c)| {
+                if let Some((prev_msg, timeout)) = &c.prev_msg {
+                    format!(
+                        "{}: {{ {}, {} }}",
+                        idx,
+                        prev_msg,
+                        timeout.elapsed().as_millis()
+                    )
+                } else {
+                    format!("{}, ", idx)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        write!(
+            f,
+            "{} - {} - [{}] - {}",
+            self.propagativity, self.reality_token, conns, self.core_map,
+        )
     }
 }
 
@@ -484,7 +479,7 @@ pub struct FlowerBuilder<E: Engine> {
 impl<E> FlowerBuilder<E>
 where
     E: Engine + 'static + Send + Sync,
-    E::Addr: Send + Sync + Clone + Serialize + for<'de> Deserialize<'de> + Hash,
+    E::Addr: Send + Sync + Clone + Serialize + for<'de> Deserialize<'de> + Hash + fmt::Display,
 {
     pub fn engine(mut self, engine: E) -> Self {
         self.engine = Some(engine);
@@ -509,7 +504,7 @@ where
             seed_list: self.seed_list,
             core_map: ItcMap::new(),
             conns: StableVec::new(),
-            rxs: vec![],
+            receivers: JoinSet::new(),
         };
 
         let handle = tokio::task::spawn(async move { flower.run().await });

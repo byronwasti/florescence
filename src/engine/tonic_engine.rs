@@ -1,6 +1,7 @@
 use crate::constants::MPSC_CHANNEL_SIZE;
 use crate::message::PollinationMessage;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -22,7 +23,7 @@ use rpc::{
 
 // The http crate doesn't support `serde` via a FF, so have to
 // do this workaround.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash)]
 pub struct Uri {
     #[serde(with = "http_serde::uri")]
     uri: http::Uri,
@@ -31,6 +32,12 @@ pub struct Uri {
 impl Uri {
     pub fn new(uri: http::Uri) -> Self {
         Self { uri }
+    }
+}
+
+impl fmt::Display for Uri {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.uri)
     }
 }
 
