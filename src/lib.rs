@@ -1,6 +1,11 @@
-pub mod connection;
 mod constants;
 mod ds;
+mod handle;
+mod nucleus;
+mod peer_info;
+mod propagativity;
+
+pub mod connection;
 pub mod engine;
 pub mod flower;
 pub mod message;

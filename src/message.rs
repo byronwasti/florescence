@@ -3,11 +3,11 @@ use serde::{Deserialize, Serialize};
 use treeclocks::{EventTree, IdTree};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct Patch {
+pub struct BinaryPatch {
     inner: Vec<u8>,
 }
 
-impl std::fmt::Display for Patch {
+impl std::fmt::Display for BinaryPatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "[")?;
         for b in self.inner.iter() {
@@ -19,15 +19,16 @@ impl std::fmt::Display for Patch {
     }
 }
 
-impl Patch {
-    pub fn new<T: Serialize>(val: T) -> anyhow::Result<Self> {
+impl BinaryPatch {
+    pub fn new<T: Serialize>(val: T) -> Result<Self, bincode::error::EncodeError> {
         let inner = bincode::serde::encode_to_vec(val, bincode::config::standard())?;
         Ok(Self { inner })
     }
 
-    pub fn downcast<T: for<'de> Deserialize<'de>>(self) -> anyhow::Result<T> {
-        let (res, rem) =
-            bincode::serde::decode_from_slice(&self.inner, bincode::config::standard())?;
+    pub fn deserialize<T: for<'de> Deserialize<'de>>(
+        self,
+    ) -> Result<T, bincode::error::DecodeError> {
+        let (res, _) = bincode::serde::decode_from_slice(&self.inner, bincode::config::standard())?;
         Ok(res)
     }
 }
@@ -45,14 +46,14 @@ pub enum PollinationMessage {
         //topic: String,
         timestamp: EventTree,
         reality_token: RealityToken,
-        patch: Patch,
+        patch: BinaryPatch,
     },
     RealitySkew {
         id: IdTree,
         //topic: String,
         timestamp: EventTree,
         reality_token: RealityToken,
-        patch: Patch,
+        patch: BinaryPatch,
         peer_count: usize,
     },
     NewMember {},
@@ -61,7 +62,7 @@ pub enum PollinationMessage {
         //topic: String,
         timestamp: EventTree,
         reality_token: RealityToken,
-        patch: Patch,
+        patch: BinaryPatch,
         new_id: IdTree,
     },
     SeeOther {
@@ -69,7 +70,7 @@ pub enum PollinationMessage {
         //topic: String,
         timestamp: EventTree,
         reality_token: RealityToken,
-        patch: Patch,
+        patch: BinaryPatch,
     },
 }
 
@@ -82,7 +83,7 @@ impl PollinationMessage {
             | Update { timestamp, .. }
             | RealitySkew { timestamp, .. }
             | SeeOther { timestamp, .. }
-            | Seed { timestamp, .. } => Some(&timestamp),
+            | Seed { timestamp, .. } => Some(timestamp),
         }
     }
     pub fn light_clone(&self) -> Self {

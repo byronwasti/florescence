@@ -18,12 +18,13 @@ impl<T> StableVec<T> {
         }
     }
 
+    #[allow(unused)]
     pub fn get(&self, index: usize) -> Option<&T> {
-        self.inner.get(index).map(|x| x.as_ref()).flatten()
+        self.inner.get(index).and_then(|x| x.as_ref())
     }
 
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        self.inner.get_mut(index).map(|x| x.as_mut()).flatten()
+        self.inner.get_mut(index).and_then(|x| x.as_mut())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &T> {
@@ -32,5 +33,10 @@ impl<T> StableVec<T> {
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
         self.inner.iter_mut().filter_map(|x| x.as_mut())
+    }
+
+    pub fn remove(&mut self, index: usize) -> Option<T> {
+        let val = self.inner.get_mut(index)?;
+        val.take()
     }
 }

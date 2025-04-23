@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::time::Duration;
-use tokio::sync::mpsc::{self, Receiver, Sender, error::TryRecvError};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status, Streaming, transport::Server};
 use tracing::{debug, error};
@@ -130,8 +130,8 @@ impl Engine for TonicEngine {
         Connection::new(tx0, rx1)
     }
 
-    fn get_new_conn(&mut self) -> impl Future<Output = Option<Connection>> {
-        async { self.new_conn_rx.recv().await }
+    async fn get_new_conn(&mut self) -> Option<Connection> {
+        self.new_conn_rx.recv().await
     }
 
     fn start(&mut self) {

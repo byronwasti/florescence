@@ -2,39 +2,30 @@ use crate::connection::Connection;
 use crate::constants;
 use crate::ds::StableVec;
 use crate::engine::Engine;
-use crate::message::{Patch, PollinationMessage};
+use crate::handle::FlowerHandle;
+use crate::message::{BinaryPatch, PollinationMessage};
+use crate::nucleus::{Nucleus, NucleusError};
+use crate::peer_info::PeerInfo;
 use crate::reality_token::RealityToken;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::HashSet;
 use std::fmt::{self, Debug};
 use std::hash::Hash;
-use std::time::{Duration, Instant};
-use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::task::{JoinHandle, JoinSet};
+use std::time::Duration;
+use tokio::sync::mpsc::Receiver;
+use tokio::task::JoinSet;
 use tokio::time::{MissedTickBehavior, interval};
 use tracing::{debug, error, info, trace, warn};
-use treeclocks::{EventTree, IdTree, ItcMap};
-
-mod handle;
-mod peer_info;
-mod propagativity;
-
-use handle::*;
-use peer_info::*;
-use propagativity::*;
+use treeclocks::{EventTree, IdTree};
 
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 struct Topic(String);
 
-#[allow(dead_code)]
 pub struct Flower<E: Engine> {
-    propagativity: Propagativity,
-    reality_token: RealityToken,
+    nucleus: Nucleus<E::Addr>,
     engine: E,
     seed_list: Vec<E::Addr>,
-    core_map: ItcMap<PeerInfo<E::Addr>>,
     conns: StableVec<Connection>,
     receivers: JoinSet<ReceiverLoop>,
 }
@@ -55,11 +46,7 @@ where
     }
 
     async fn run(mut self) -> anyhow::Result<()> {
-        let id = self.propagativity.id().unwrap();
-        self.core_map.insert(
-            id.clone(),
-            PeerInfo::new(id.clone(), self.engine.addr().clone()),
-        );
+        self.nucleus.set(self.own_info());
 
         let mut seed_list = std::mem::take(&mut self.seed_list);
         for addr in seed_list.drain(..) {
@@ -78,12 +65,7 @@ where
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    trace!("TICK");
-
-                    if let Some(id) = self.propagativity.id() {
-                        trace!("bumping event for id {id:?}");
-                        self.core_map.event(id);
-                    }
+                    self.nucleus.bump();
 
                     // TODO: Handle error
                     if let Some(msg) = self.msg_heartbeat() {
@@ -111,7 +93,7 @@ where
 
                 res = self.receivers.join_next() => {
                     match res {
-                        Some(Ok((mut rx, idx, msg))) => {
+                        Some(Ok((rx, idx, msg))) => {
                             if let Some(msg) = msg {
                                 self.handle_msg(idx, msg).await;
                                 self.spawn_receiver_loop(idx, rx);
@@ -175,7 +157,10 @@ where
             debug!("o {idx}: {msg}");
             // TODO: Handle errors
             let conn = self.conns.get_mut(idx).unwrap();
-            conn.send(msg).await;
+            if let Err(err) = conn.send(msg).await {
+                error!("Connection error: {err}");
+                self.conns.remove(idx);
+            }
         }
     }
 
@@ -186,15 +171,15 @@ where
         peer_ts: EventTree,
         peer_rt: RealityToken,
     ) -> Option<PollinationMessage> {
-        match self.core_map.timestamp().partial_cmp(&peer_ts) {
+        match self.nucleus.timestamp().partial_cmp(&peer_ts) {
             Some(Ordering::Greater) | None => {
-                let patch = self.create_patch(peer_ts);
+                let patch = self.nucleus.create_patch(&peer_ts);
                 self.msg_update(patch)
             }
             Some(Ordering::Less) => self.msg_heartbeat(),
             Some(Ordering::Equal) => {
-                if peer_rt != self.reality_token {
-                    let patch = self.create_patch(peer_ts);
+                if peer_rt != self.nucleus.reality_token() {
+                    let patch = self.nucleus.create_patch(&peer_ts);
                     self.msg_reality_skew(patch)
                 } else {
                     None
@@ -205,60 +190,38 @@ where
 
     fn handle_update(
         &mut self,
-        idx: usize,
-        peer_id: IdTree,
+        _idx: usize,
+        _peer_id: IdTree,
         peer_ts: EventTree,
         peer_rt: RealityToken,
-        patch: Patch,
+        patch: BinaryPatch,
     ) -> Option<PollinationMessage> {
-        // TODO: handle error
-        let patch = patch.downcast().unwrap();
-        match self.core_map.timestamp().partial_cmp(&peer_ts) {
+        match self.nucleus.timestamp().partial_cmp(&peer_ts) {
             Some(Ordering::Greater) => {
-                let patch = self.create_patch(peer_ts);
+                let patch = self.nucleus.create_patch(&peer_ts);
                 self.msg_update(patch)
             }
-            cmp @ Some(Ordering::Less) | cmp @ None => {
-                if peer_rt != self.reality_token {
-                    let mut core_clone = self.core_map.clone();
-                    let mut rt_clone = self.reality_token.clone();
-
-                    let mut removals = core_clone.apply(patch);
-                    for (id, _) in removals.drain(..) {
-                        rt_clone.increment(id);
-                    }
-
-                    if rt_clone != peer_rt {
-                        let patch = self.create_patch(peer_ts);
-                        self.msg_reality_skew(patch)
-                    } else {
-                        self.core_map = core_clone;
-                        self.reality_token = rt_clone;
-
-                        if cmp.is_none() {
-                            let patch = self.create_patch(peer_ts);
-                            self.msg_update(patch)
-                        } else {
-                            None
-                        }
-                    }
-                } else {
-                    let mut removals = self.core_map.apply(patch);
-                    for (id, _) in removals.drain(..) {
-                        self.reality_token.increment(id);
-                    }
-
+            cmp @ Some(Ordering::Less) | cmp @ None => match self.nucleus.apply(peer_rt, patch) {
+                Ok(()) => {
                     if cmp.is_none() {
-                        let patch = self.create_patch(peer_ts);
+                        let patch = self.nucleus.create_patch(&peer_ts);
                         self.msg_update(patch)
                     } else {
                         None
                     }
                 }
-            }
+                Err(NucleusError::RealitySkew) => {
+                    let patch = self.nucleus.create_patch(&peer_ts);
+                    self.msg_reality_skew(patch)
+                }
+                Err(err) => {
+                    error!("Error applying patch: {err}");
+                    None
+                }
+            },
             Some(Ordering::Equal) => {
-                if peer_rt != self.reality_token {
-                    let patch = self.create_patch(peer_ts);
+                if peer_rt != self.nucleus.reality_token() {
+                    let patch = self.nucleus.create_patch(&peer_ts);
                     self.msg_reality_skew(patch)
                 } else {
                     None
@@ -273,36 +236,36 @@ where
         _peer_id: IdTree,
         peer_ts: EventTree,
         peer_rt: RealityToken,
-        _patch: Patch,
+        patch: BinaryPatch,
         peer_count: usize,
     ) -> Option<PollinationMessage> {
-        // TODO: Verify the skew
-
-        match self.core_map.len().cmp(&peer_count) {
-            Ordering::Greater => {
-                let patch = self.create_patch(peer_ts);
-                self.msg_reality_skew(patch)
-            }
-            Ordering::Less => self.msg_new_member(),
-            Ordering::Equal => {
-                if self.reality_token > peer_rt {
-                    let patch = self.create_patch(peer_ts);
+        if matches!(
+            self.nucleus.apply(peer_rt, patch),
+            Err(NucleusError::RealitySkew)
+        ) {
+            match self.nucleus.peer_count().cmp(&peer_count) {
+                Ordering::Greater => {
+                    let patch = self.nucleus.create_patch(&peer_ts);
                     self.msg_reality_skew(patch)
-                } else {
-                    self.msg_new_member()
+                }
+                Ordering::Less => self.msg_new_member(),
+                Ordering::Equal => {
+                    if self.nucleus.reality_token() > peer_rt {
+                        let patch = self.nucleus.create_patch(&peer_ts);
+                        self.msg_reality_skew(patch)
+                    } else {
+                        self.msg_new_member()
+                    }
                 }
             }
+        } else {
+            warn!("Reality skew detected by peer, but not by self.");
+            self.msg_heartbeat()
         }
     }
 
     fn handle_new_member(&mut self) -> Option<PollinationMessage> {
-        if let Some(peer_id) = self.propagativity.propagate() {
-            let id = self.propagativity.id().unwrap();
-            self.core_map.insert(
-                id.clone(),
-                PeerInfo::new(id.clone(), self.engine.addr().clone()),
-            );
-
+        if let Some(peer_id) = self.nucleus.propagate() {
             self.msg_seed(peer_id)
         } else {
             self.msg_see_other()
@@ -313,22 +276,20 @@ where
         &mut self,
         _idx: usize,
         _peer_id: IdTree,
-        peer_ts: EventTree,
+        _peer_ts: EventTree,
         peer_rt: RealityToken,
-        patch: Patch,
+        patch: BinaryPatch,
         new_id: IdTree,
     ) -> Option<PollinationMessage> {
-        // TODO: handle error
-        match patch.downcast() {
+        // TODO: handle error better
+        match patch.deserialize() {
             Ok(patch) => {
-                self.core_map = ItcMap::new();
-                self.core_map.apply(patch);
-                self.core_map.insert(
-                    new_id.clone(),
-                    PeerInfo::new(new_id.clone(), self.engine.addr().clone()),
-                );
-                self.propagativity = Propagativity::Resting(new_id, Instant::now());
-                self.reality_token = peer_rt;
+                self.nucleus = Nucleus::from_parts(new_id, peer_rt, patch);
+                if self.nucleus.set(self.own_info()) {
+                    error!(
+                        "PeerId's were removed when handling initial insert from seed. This is a sign of bug in stability of ID's."
+                    );
+                }
 
                 self.msg_heartbeat()
             }
@@ -343,9 +304,9 @@ where
         &mut self,
         _idx: usize,
         _peer_id: IdTree,
-        peer_ts: EventTree,
-        peer_rt: RealityToken,
-        patch: Patch,
+        _peer_ts: EventTree,
+        _peer_rt: RealityToken,
+        _patch: BinaryPatch,
     ) -> Option<PollinationMessage> {
         warn!("SeeOther not implemented.");
         // TODO: Needs a rethink
@@ -360,32 +321,32 @@ where
     }
 
     fn msg_heartbeat(&self) -> Option<PollinationMessage> {
-        let id = self.propagativity.id()?.clone();
+        let id = self.nucleus.id()?.clone();
         Some(PollinationMessage::Heartbeat {
             id,
-            timestamp: self.core_map.timestamp().to_owned(),
-            reality_token: self.reality_token,
+            timestamp: self.nucleus.timestamp().to_owned(),
+            reality_token: self.nucleus.reality_token(),
         })
     }
 
-    fn msg_update(&self, patch: Patch) -> Option<PollinationMessage> {
-        let id = self.propagativity.id()?.clone();
+    fn msg_update(&self, patch: BinaryPatch) -> Option<PollinationMessage> {
+        let id = self.nucleus.id()?.clone();
         Some(PollinationMessage::Update {
             id,
-            timestamp: self.core_map.timestamp().to_owned(),
-            reality_token: self.reality_token.clone(),
+            timestamp: self.nucleus.timestamp().to_owned(),
+            reality_token: self.nucleus.reality_token(),
             patch,
         })
     }
 
-    fn msg_reality_skew(&self, patch: Patch) -> Option<PollinationMessage> {
-        let id = self.propagativity.id()?.clone();
+    fn msg_reality_skew(&self, patch: BinaryPatch) -> Option<PollinationMessage> {
+        let id = self.nucleus.id()?.clone();
         Some(PollinationMessage::RealitySkew {
             id,
-            timestamp: self.core_map.timestamp().to_owned(),
-            reality_token: self.reality_token.clone(),
+            timestamp: self.nucleus.timestamp().to_owned(),
+            reality_token: self.nucleus.reality_token(),
             patch,
-            peer_count: self.core_map.len(),
+            peer_count: self.nucleus.peer_count(),
         })
     }
 
@@ -395,33 +356,26 @@ where
     }
 
     fn msg_seed(&self, new_id: IdTree) -> Option<PollinationMessage> {
-        let id = self.propagativity.id()?.clone();
-        let patch = self.core_map.diff(&EventTree::Leaf(0));
-        let patch = Patch::new(patch).expect("Error serializing patch");
+        let id = self.nucleus.id()?.clone();
+        let patch = self.nucleus.create_patch(&EventTree::Leaf(0));
         Some(PollinationMessage::Seed {
             id,
-            timestamp: self.core_map.timestamp().to_owned(),
-            reality_token: self.reality_token.clone(),
+            timestamp: self.nucleus.timestamp().to_owned(),
+            reality_token: self.nucleus.reality_token(),
             patch,
             new_id,
         })
     }
 
     fn msg_see_other(&self) -> Option<PollinationMessage> {
-        let id = self.propagativity.id()?.clone();
-        let patch = self.core_map.diff(&EventTree::Leaf(0));
-        let patch = Patch::new(patch).expect("Error serializing patch");
+        let id = self.nucleus.id()?.clone();
+        let patch = self.nucleus.create_patch(&EventTree::Leaf(0));
         Some(PollinationMessage::SeeOther {
             id,
-            timestamp: self.core_map.timestamp().to_owned(),
-            reality_token: self.reality_token.clone(),
+            timestamp: self.nucleus.timestamp().to_owned(),
+            reality_token: self.nucleus.reality_token(),
             patch,
         })
-    }
-
-    fn create_patch(&self, peer_ts: EventTree) -> Patch {
-        let itc_patch = self.core_map.diff(&peer_ts);
-        Patch::new(itc_patch).expect("Error serializing patch")
     }
 
     async fn broadcast(&mut self, message: PollinationMessage) -> anyhow::Result<()> {
@@ -437,6 +391,10 @@ where
             let msg = rx.recv().await;
             (rx, idx, msg)
         });
+    }
+
+    fn own_info(&self) -> PeerInfo<E::Addr> {
+        PeerInfo::new(self.engine.addr().clone())
     }
 }
 
@@ -463,11 +421,7 @@ where
             })
             .collect::<Vec<_>>()
             .join(", ");
-        write!(
-            f,
-            "{} - {} - [{}] - {}",
-            self.propagativity, self.reality_token, conns, self.core_map,
-        )
+        write!(f, "{} - [{}]", self.nucleus, conns)
     }
 }
 
@@ -495,14 +449,10 @@ where
         let mut engine = self.engine.expect("No engine");
         engine.start();
 
-        let id = IdTree::One;
-
         let flower = Flower {
-            propagativity: Propagativity::Propagating(IdTree::One),
-            reality_token: RealityToken::new(),
+            nucleus: Nucleus::new(),
             engine,
             seed_list: self.seed_list,
-            core_map: ItcMap::new(),
             conns: StableVec::new(),
             receivers: JoinSet::new(),
         };
