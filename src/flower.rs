@@ -15,14 +15,14 @@ use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinSet;
 use tokio::time::{MissedTickBehavior, interval};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{Instrument, debug, error, info, trace, warn};
 use treeclocks::{EventTree, IdTree};
 
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 struct Topic(String);
 
-pub struct Flower<E: Engine> {
+pub struct Flower<E: Engine<PollinationMessage>> {
     nucleus: Nucleus<E::Addr>,
     engine: E,
     seed_list: Vec<E::Addr>,
@@ -38,7 +38,7 @@ type ReceiverLoop = (
 
 impl<E> Flower<E>
 where
-    E: Engine,
+    E: Engine<PollinationMessage>,
     E::Addr: Clone + Serialize + for<'de> Deserialize<'de> + Hash + fmt::Display,
 {
     pub fn builder() -> FlowerBuilder<E> {
@@ -51,9 +51,8 @@ where
         let mut seed_list = std::mem::take(&mut self.seed_list);
         for addr in seed_list.drain(..) {
             if addr != *self.engine.addr() {
-                let mut conn = self.engine.create_conn(addr);
-                let rx = conn.take_rx().unwrap();
-                let idx = self.conns.push(conn);
+                let (tx, rx) = self.engine.create_conn(addr).await;
+                let idx = self.conns.push(Connection::new(tx));
                 self.spawn_receiver_loop(idx, rx);
             }
         }
@@ -75,14 +74,9 @@ where
                 }
 
                 new_conn = self.engine.get_new_conn() => {
-                    //if let Some((tx, mut rx)) = new_conn {
-                    if let Some(mut conn) = new_conn {
-                        let mut rx = conn.take_rx().unwrap();
-                        let idx = self.conns.push(conn);
-                        self.receivers.spawn(async move {
-                            let msg = rx.recv().await;
-                            (rx, idx, msg)
-                        });
+                    if let Some((tx, mut rx)) = new_conn {
+                        let idx = self.conns.push(Connection::new(tx));
+                        self.spawn_receiver_loop(idx, rx);
                     } else {
                         error!("Engine stopped working.");
 
@@ -282,7 +276,7 @@ where
         new_id: IdTree,
     ) -> Option<PollinationMessage> {
         // TODO: handle error better
-        match patch.deserialize() {
+        match patch.decode() {
             Ok(patch) => {
                 self.nucleus = Nucleus::from_parts(new_id, peer_rt, patch);
                 if self.nucleus.set(self.own_info()) {
@@ -387,10 +381,13 @@ where
     }
 
     fn spawn_receiver_loop(&mut self, idx: usize, mut rx: Receiver<PollinationMessage>) {
-        self.receivers.spawn(async move {
-            let msg = rx.recv().await;
-            (rx, idx, msg)
-        });
+        self.receivers.spawn(
+            async move {
+                let msg = rx.recv().await;
+                (rx, idx, msg)
+            }
+            .in_current_span(),
+        );
     }
 
     fn own_info(&self) -> PeerInfo<E::Addr> {
@@ -398,7 +395,7 @@ where
     }
 }
 
-impl<E: Engine> fmt::Display for Flower<E>
+impl<E: Engine<PollinationMessage>> fmt::Display for Flower<E>
 where
     E::Addr: fmt::Display,
 {
@@ -425,14 +422,14 @@ where
     }
 }
 
-pub struct FlowerBuilder<E: Engine> {
+pub struct FlowerBuilder<E: Engine<PollinationMessage>> {
     engine: Option<E>,
     seed_list: Vec<E::Addr>,
 }
 
 impl<E> FlowerBuilder<E>
 where
-    E: Engine + 'static + Send + Sync,
+    E: Engine<PollinationMessage> + 'static + Send + Sync,
     E::Addr: Send + Sync + Clone + Serialize + for<'de> Deserialize<'de> + Hash + fmt::Display,
 {
     pub fn engine(mut self, engine: E) -> Self {
@@ -457,13 +454,13 @@ where
             receivers: JoinSet::new(),
         };
 
-        let handle = tokio::task::spawn(async move { flower.run().await });
+        let handle = tokio::task::spawn(async move { flower.run().await }.in_current_span());
 
         Ok(FlowerHandle { handle })
     }
 }
 
-impl<E: Engine> Default for FlowerBuilder<E> {
+impl<E: Engine<PollinationMessage>> Default for FlowerBuilder<E> {
     fn default() -> FlowerBuilder<E> {
         FlowerBuilder {
             engine: None,

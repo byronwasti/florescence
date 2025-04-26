@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::time::Instant;
 use thiserror::Error;
-use treeclocks::{EventTree, IdTree, ItcMap};
+use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 
 pub(crate) struct Nucleus<A> {
     propagativity: Propagativity,
@@ -24,7 +24,7 @@ where
 
     pub(crate) fn from_parts(id: IdTree, reality_token: RealityToken, patch: BinaryPatch) -> Self {
         // TODO: Handle error
-        let patch = patch.deserialize().expect("Error deserializing patch");
+        let patch = patch.decode().expect("Error deserializing patch");
         let propagativity = Propagativity::Resting(id.clone(), Instant::now());
 
         let mut core_map = ItcMap::new();
@@ -82,8 +82,12 @@ where
     }
 
     pub(crate) fn create_patch(&self, peer_ts: &EventTree) -> BinaryPatch {
-        let itc_patch = self.core_map.diff(peer_ts);
-        BinaryPatch::new(itc_patch).expect("Error serializing patch")
+        let itc_patch: Patch<PeerInfo<_>> = self.core_map.diff(peer_ts);
+        let patch = BinaryPatch::new(itc_patch).expect("Error serializing patch");
+
+        let _ = patch.clone().decode::<Patch<PeerInfo<A>>>().unwrap();
+
+        patch
     }
 
     pub(crate) fn apply(
@@ -91,7 +95,7 @@ where
         peer_rt: RealityToken,
         patch: BinaryPatch,
     ) -> Result<(), NucleusError> {
-        let patch = patch.deserialize()?;
+        let patch: Patch<PeerInfo<_>> = patch.decode()?;
         let mut rt = self.reality_token;
         let mut core = if peer_rt != self.reality_token {
             self.core_map.clone()

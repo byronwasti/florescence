@@ -25,9 +25,7 @@ impl BinaryPatch {
         Ok(Self { inner })
     }
 
-    pub fn deserialize<T: for<'de> Deserialize<'de>>(
-        self,
-    ) -> Result<T, bincode::error::DecodeError> {
+    pub fn decode<T: for<'de> Deserialize<'de>>(self) -> Result<T, bincode::error::DecodeError> {
         let (res, _) = bincode::serde::decode_from_slice(&self.inner, bincode::config::standard())?;
         Ok(res)
     }
@@ -167,5 +165,31 @@ impl std::fmt::Display for PollinationMessage {
                 write!(f, "SO - {id} - {timestamp} - {reality_token} - {patch}")
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use treeclocks::{ItcMap, Patch};
+
+    #[test]
+    fn test_binary_patch_behavior() {
+        let patch = BinaryPatch::new("this is some string".to_string()).unwrap();
+        let string: String = patch.decode().unwrap();
+        assert_eq!(string, "this is some string".to_string());
+    }
+
+    #[test]
+    fn test_binary_patch_behavior_itc_map() {
+        let mut m = ItcMap::new();
+        m.insert(IdTree::One, 1);
+
+        let p_in = m.diff(&EventTree::new());
+
+        let p_bin = BinaryPatch::new(p_in).unwrap();
+        let p_out = p_bin.decode::<Patch<i32>>().unwrap();
+
+        //assert_eq!(string, bbh);
     }
 }

@@ -8,20 +8,11 @@ use tracing::debug;
 pub struct Connection {
     pub(crate) prev_msg: Option<(PollinationMessage, Instant)>,
     tx: Sender<PollinationMessage>,
-    rx: Option<Receiver<PollinationMessage>>,
 }
 
 impl Connection {
-    pub fn new(tx: Sender<PollinationMessage>, rx: Receiver<PollinationMessage>) -> Self {
-        Self {
-            prev_msg: None,
-            tx,
-            rx: Some(rx),
-        }
-    }
-
-    pub fn take_rx(&mut self) -> Option<Receiver<PollinationMessage>> {
-        self.rx.take()
+    pub fn new(tx: Sender<PollinationMessage>) -> Self {
+        Self { prev_msg: None, tx }
     }
 
     pub async fn send(

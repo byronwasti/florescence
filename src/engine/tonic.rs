@@ -51,11 +51,11 @@ impl FromStr for Uri {
 }
 
 /// Streaming RPC via Tonic library
-pub struct TonicEngine {
+pub struct TonicEngine<T> {
     socket_addr: SocketAddr,
     addr: Uri,
-    new_conn_tx: Option<Sender<Connection>>,
-    new_conn_rx: Receiver<Connection>,
+    new_conn_tx: Option<Sender<T>>,
+    new_conn_rx: Receiver<T>,
 }
 
 impl TonicEngine {
@@ -72,14 +72,16 @@ impl TonicEngine {
     }
 }
 
-impl Engine for TonicEngine {
+impl<T> Engine for TonicEngine<T>
+where T: Serialize + for<'a> Deserialize<'a> + Clone
+{
     type Addr = Uri;
 
     fn addr(&self) -> &Self::Addr {
         &self.addr
     }
 
-    fn create_conn(&mut self, addr: Uri) -> Connection {
+    fn create_conn(&mut self, addr: Uri) -> T {
         let (tx0, rx0) = mpsc::channel(MPSC_CHANNEL_SIZE);
         let (tx1, rx1) = mpsc::channel(MPSC_CHANNEL_SIZE);
         tokio::task::spawn(async move {
@@ -92,7 +94,7 @@ impl Engine for TonicEngine {
                 }
             };
 
-            let in_stream = ReceiverStream::new(rx0).map(|x: PollinationMessage| TonicReqWrapper {
+            let in_stream = ReceiverStream::new(rx0).map(|x| TonicReqWrapper {
                 raw: bincode::serde::encode_to_vec(x, bincode::config::standard())
                     .expect("Unable to serialize message"),
             });
@@ -127,10 +129,10 @@ impl Engine for TonicEngine {
             }
         });
 
-        Connection::new(tx0, rx1)
+        (tx0, rx1)
     }
 
-    async fn get_new_conn(&mut self) -> Option<Connection> {
+    async fn get_new_conn(&mut self) -> Option<(Sender<T>, Receiver<T>)> {
         self.new_conn_rx.recv().await
     }
 
@@ -148,12 +150,14 @@ impl Engine for TonicEngine {
     }
 }
 
+type HandlerConnection = (Sender<TonicReqWrapper>, Receiver<TonicReqWrapper>);
+
 struct Handler {
-    tx: Sender<Connection>,
+    tx: Sender<HandlerConnection>,
 }
 
 impl Handler {
-    pub fn new(tx: Sender<Connection>) -> Self {
+    pub fn new(tx: Sender<HandlerConnection>) -> Self {
         Self { tx }
     }
 }
@@ -187,16 +191,9 @@ impl Gossip for Handler {
                         todo!()
                     }
                     Ok(Some(val)) => {
-                        if let Ok((val, _)) =
-                            bincode::serde::decode_from_slice(&val.raw, bincode::config::standard())
-                        {
-                            if let Err(err) = tx1.send(val).await {
-                                debug!("Internal mpsc errored: {err}");
-                                break;
-                            }
-                        } else {
-                            // TODO: Log error
-                            error!("Unable to deserialize the request");
+                        if let Err(err) = tx1.send(val).await {
+                            debug!("Internal mpsc errored: {err}");
+                            break;
                         }
                     }
                     Err(err) => {
@@ -206,12 +203,7 @@ impl Gossip for Handler {
             }
         });
 
-        let out_stream = ReceiverStream::new(rx0).map(|x: PollinationMessage| {
-            Ok(TonicReqWrapper {
-                raw: bincode::serde::encode_to_vec(x, bincode::config::standard())
-                    .expect("Unable to serialize message"),
-            })
-        });
+        let out_stream = ReceiverStream::new(rx0);
         Ok(Response::new(Box::pin(out_stream) as Self::GossipStream))
     }
 }

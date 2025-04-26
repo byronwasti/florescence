@@ -1,11 +1,25 @@
-use crate::connection::Connection;
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::hash::Hash;
+use tokio::sync::mpsc::{Receiver, Sender};
 
-mod tonic_engine;
+//mod tonic;
+pub mod mpsc;
 
-pub use tonic_engine::TonicEngine;
+//pub use tonic::TonicEngine;
 
-pub trait Engine: Send {
-    type Addr: PartialEq;
+pub trait Engine<T>: Send + Sync
+where
+    T: Serialize + for<'a> Deserialize<'a> + Clone,
+{
+    type Addr: PartialEq
+        + Clone
+        + Serialize
+        + for<'a> Deserialize<'a>
+        + Hash
+        + fmt::Display
+        + Send
+        + Sync;
     // TODO: Associated error type
 
     /// Must be non-blocking
@@ -14,7 +28,10 @@ pub trait Engine: Send {
 
     fn addr(&self) -> &Self::Addr;
 
-    fn create_conn(&mut self, addr: Self::Addr) -> Connection;
+    fn create_conn(
+        &mut self,
+        addr: Self::Addr,
+    ) -> impl Future<Output = (Sender<T>, Receiver<T>)> + Send;
 
-    fn get_new_conn(&mut self) -> impl Future<Output = Option<Connection>> + Send;
+    fn get_new_conn(&mut self) -> impl Future<Output = Option<(Sender<T>, Receiver<T>)>> + Send;
 }
