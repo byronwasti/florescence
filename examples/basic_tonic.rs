@@ -1,3 +1,4 @@
+/*
 use anyhow::Result;
 use clap::Parser;
 use florescence::{Flower, engine::TonicEngine};
@@ -47,4 +48,9 @@ async fn main() -> Result<()> {
 
     flower.runtime().await?;
     Ok(())
+}
+*/
+
+fn main() {
+    todo!()
 }

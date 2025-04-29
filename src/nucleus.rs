@@ -24,7 +24,7 @@ where
 
     pub(crate) fn from_parts(id: IdTree, reality_token: RealityToken, patch: BinaryPatch) -> Self {
         // TODO: Handle error
-        let patch = patch.decode().expect("Error deserializing patch");
+        let patch: Patch<PeerInfo<A>> = patch.decode().expect("Error deserializing patch");
         let propagativity = Propagativity::Resting(id.clone(), Instant::now());
 
         let mut core_map = ItcMap::new();
@@ -82,12 +82,8 @@ where
     }
 
     pub(crate) fn create_patch(&self, peer_ts: &EventTree) -> BinaryPatch {
-        let itc_patch: Patch<PeerInfo<_>> = self.core_map.diff(peer_ts);
-        let patch = BinaryPatch::new(itc_patch).expect("Error serializing patch");
-
-        let _ = patch.clone().decode::<Patch<PeerInfo<A>>>().unwrap();
-
-        patch
+        let itc_patch: Patch<PeerInfo<A>> = self.core_map.diff(peer_ts);
+        BinaryPatch::new(itc_patch).expect("Error serializing patch")
     }
 
     pub(crate) fn apply(
@@ -95,7 +91,7 @@ where
         peer_rt: RealityToken,
         patch: BinaryPatch,
     ) -> Result<(), NucleusError> {
-        let patch: Patch<PeerInfo<_>> = patch.decode()?;
+        let patch: Patch<PeerInfo<A>> = patch.decode()?;
         let mut rt = self.reality_token;
         let mut core = if peer_rt != self.reality_token {
             self.core_map.clone()
@@ -152,4 +148,25 @@ pub(crate) enum NucleusError {
 
     #[error("Deserialization error: {0}")]
     DeserializationError(#[from] bincode::error::DecodeError),
+
+    #[error("Other: {0}")]
+    Other(#[from] anyhow::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_nucleus() {
+        let mut n0 = Nucleus::new();
+        n0.set(PeerInfo::new(10));
+
+        let peer_id = n0.propagate().unwrap();
+        n0.set(PeerInfo::new(10));
+        let patch = n0.create_patch(&EventTree::new());
+
+        let mut n1 = Nucleus::<usize>::from_parts(peer_id, n0.reality_token(), patch);
+        n1.set(PeerInfo::new(10));
+    }
 }

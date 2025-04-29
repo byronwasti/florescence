@@ -275,23 +275,15 @@ where
         patch: BinaryPatch,
         new_id: IdTree,
     ) -> Option<PollinationMessage> {
-        // TODO: handle error better
-        match patch.decode() {
-            Ok(patch) => {
-                self.nucleus = Nucleus::from_parts(new_id, peer_rt, patch);
-                if self.nucleus.set(self.own_info()) {
-                    error!(
-                        "PeerId's were removed when handling initial insert from seed. This is a sign of bug in stability of ID's."
-                    );
-                }
-
-                self.msg_heartbeat()
-            }
-            Err(err) => {
-                error!("Error parsing patch: {err:?}");
-                None
-            }
+        // TODO: Handle error
+        self.nucleus = Nucleus::from_parts(new_id, peer_rt, patch);
+        if self.nucleus.set(self.own_info()) {
+            error!(
+                "PeerId's were removed when handling initial insert from seed. This is a sign of bug in stability of ID's."
+            );
         }
+
+        self.msg_heartbeat()
     }
 
     fn handle_see_other(
