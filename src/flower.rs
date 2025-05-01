@@ -1,6 +1,6 @@
 use crate::connection::Connection;
 use crate::constants;
-use crate::ds::StableVec;
+use crate::ds::{StableVec, WalkieTalkie};
 use crate::engine::Engine;
 use crate::handle::FlowerHandle;
 use crate::message::{BinaryPatch, PollinationMessage};
@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Debug};
 use std::hash::Hash;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinSet;
@@ -28,6 +29,7 @@ pub struct Flower<E: Engine<PollinationMessage>> {
     seed_list: Vec<E::Addr>,
     conns: StableVec<Connection>,
     receivers: JoinSet<ReceiverLoop>,
+    handle_comm: WalkieTalkie<Nucleus<E::Addr>, ()>,
 }
 
 type ReceiverLoop = (
@@ -72,6 +74,10 @@ where
                         debug!("o b {msg}");
                         let _ = self.broadcast(msg).await;
                     }
+                }
+
+                _ = self.handle_comm.recv() => {
+                    let _ = self.handle_comm.send(self.nucleus.clone());
                 }
 
                 new_conn = self.engine.get_new_conn() => {
@@ -444,21 +450,23 @@ where
         self
     }
 
-    pub async fn bloom(self) -> anyhow::Result<FlowerHandle> {
+    pub async fn bloom(self) -> anyhow::Result<FlowerHandle<E::Addr>> {
         let mut engine = self.engine.expect("No engine");
         engine.start().await;
 
+        let (w0, w1) = WalkieTalkie::pair();
         let flower = Flower {
             nucleus: Nucleus::new(),
             engine,
             seed_list: self.seed_list,
             conns: StableVec::new(),
             receivers: JoinSet::new(),
+            handle_comm: w0,
         };
 
         let handle = tokio::task::spawn(async move { flower.run().await }.in_current_span());
 
-        Ok(FlowerHandle { handle })
+        Ok(FlowerHandle::new(w1, handle))
     }
 }
 

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use florescence::{
-    Flower,
+    Flower, FlowerHandle,
     engine::{
         Engine,
         mpsc::{MpscEngine, World, new_world},

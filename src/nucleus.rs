@@ -9,6 +9,7 @@ use thiserror::Error;
 use tracing::{debug, info};
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 
+#[derive(Clone, Debug)]
 pub(crate) struct Nucleus<A> {
     propagativity: Propagativity,
     reality_token: RealityToken,
