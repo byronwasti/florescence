@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::time::Instant;
 use thiserror::Error;
+use tracing::{debug, info};
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 
 pub(crate) struct Nucleus<A> {
@@ -92,27 +93,27 @@ where
         patch: BinaryPatch,
     ) -> Result<(), NucleusError> {
         let patch: Patch<PeerInfo<A>> = patch.decode()?;
-        let mut rt = self.reality_token;
-        let mut core = if peer_rt != self.reality_token {
+        let mut new_rt = self.reality_token;
+        let mut new_core = if peer_rt != self.reality_token {
             self.core_map.clone()
         } else {
             std::mem::take(&mut self.core_map)
         };
 
-        let mut removals = core.apply(patch);
+        let mut removals = new_core.apply(patch);
         for (id, _) in removals.drain(..) {
-            rt.increment(id);
+            new_rt.increment(id);
         }
 
-        if rt != peer_rt {
+        if new_rt != peer_rt {
             if peer_rt == self.reality_token {
                 panic!("Corrupted update.");
             }
 
             Err(NucleusError::RealitySkew)
         } else {
-            self.reality_token = rt;
-            self.core_map = core;
+            self.reality_token = new_rt;
+            self.core_map = new_core;
             Ok(())
         }
     }
@@ -161,12 +162,21 @@ mod tests {
     fn test_nucleus() {
         let mut n0 = Nucleus::new();
         n0.set(PeerInfo::new(10));
+        assert_eq!(n0.timestamp().to_string(), "1".to_string());
 
         let peer_id = n0.propagate().unwrap();
-        n0.set(PeerInfo::new(10));
+        n0.set(PeerInfo::new(11));
+        assert_eq!(n0.timestamp().to_string(), "(1, 1, 0)".to_string());
+
         let patch = n0.create_patch(&EventTree::new());
+        n0.set(PeerInfo::new(12));
+        assert_eq!(n0.timestamp().to_string(), "(1, 2, 0)".to_string());
 
         let mut n1 = Nucleus::<usize>::from_parts(peer_id, n0.reality_token(), patch);
-        n1.set(PeerInfo::new(10));
+        n1.set(PeerInfo::new(0));
+        n1.set(PeerInfo::new(1));
+
+        assert_eq!(n1.timestamp().to_string(), "(3, 0, 1)".to_string());
+        assert_eq!(n0.timestamp().to_string(), "(1, 2, 0)".to_string());
     }
 }

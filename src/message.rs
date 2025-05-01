@@ -9,6 +9,7 @@ pub struct BinaryPatch {
 }
 
 impl std::fmt::Display for BinaryPatch {
+    #[cfg(not(feature = "json"))]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "[")?;
         for b in self.inner.iter() {
@@ -17,6 +18,12 @@ impl std::fmt::Display for BinaryPatch {
         write!(f, "]")?;
 
         Ok(())
+    }
+
+    #[cfg(feature = "json")]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        let s = String::from_utf8(self.inner.clone()).map_err(|_| std::fmt::Error {})?;
+        write!(f, "{s}")
     }
 }
 
@@ -28,10 +35,10 @@ impl BinaryPatch {
     }
 
     #[cfg(feature = "json")]
-    pub fn new<T: Serialize + for<'de> Deserialize<'de>>(val: T) -> anyhow::Result<Self> {
+    pub fn new<T: Serialize>(val: T) -> anyhow::Result<Self> {
         let inner = serde_json::to_string(&val)?;
         let inner = inner.into_bytes();
-        Ok(Self { inner });
+        Ok(Self { inner })
     }
 
     #[cfg(not(feature = "json"))]

@@ -42,8 +42,9 @@ where
 {
     type Addr = usize;
 
-    fn start(&mut self) {
-        // Nothing to do.
+    async fn start(&mut self) {
+        // pause for a moment in case you are spinning up multiple
+        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
     }
 
     fn addr(&self) -> &Self::Addr {

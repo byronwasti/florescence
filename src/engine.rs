@@ -24,7 +24,7 @@ where
 
     /// Must be non-blocking
     // TODO: This is a weird API; maybe it should return engine?
-    fn start(&mut self);
+    fn start(&mut self) -> impl Future<Output = ()> + Send;
 
     fn addr(&self) -> &Self::Addr;
 

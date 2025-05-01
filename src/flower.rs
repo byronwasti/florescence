@@ -15,7 +15,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinSet;
 use tokio::time::{MissedTickBehavior, interval};
-use tracing::{Instrument, debug, error, info, trace, warn};
+use tracing::{Instrument, debug, error, info, instrument, trace, warn};
 use treeclocks::{EventTree, IdTree};
 
 #[derive(Clone, Debug)]
@@ -45,6 +45,7 @@ where
         FlowerBuilder::default()
     }
 
+    //#[instrument(skip_all, add_field(info = self.own_info()))]
     async fn run(mut self) -> anyhow::Result<()> {
         self.nucleus.set(self.own_info());
 
@@ -60,7 +61,7 @@ where
         let mut interval = interval(constants::TICK_TIME);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        info!("Looping");
+        debug!("Looping");
         loop {
             tokio::select! {
                 _ = interval.tick() => {
@@ -109,6 +110,7 @@ where
     }
 
     async fn handle_msg(&mut self, idx: usize, message: PollinationMessage) {
+        debug!("s0 {self}");
         debug!("i {idx}: {message}");
         let msg = match message {
             PollinationMessage::Heartbeat {
@@ -145,7 +147,7 @@ where
             } => self.handle_see_other(idx, id, timestamp, reality_token, patch),
         };
 
-        debug!("s {self}");
+        debug!("s1 {self}");
 
         if let Some(msg) = msg {
             debug!("o {idx}: {msg}");
@@ -158,6 +160,7 @@ where
         }
     }
 
+    #[instrument(name = "HB", skip_all)]
     fn handle_heartbeat(
         &self,
         _idx: usize,
@@ -182,6 +185,7 @@ where
         }
     }
 
+    #[instrument(name = "UP", skip_all)]
     fn handle_update(
         &mut self,
         _idx: usize,
@@ -224,6 +228,7 @@ where
         }
     }
 
+    #[instrument(name = "RS", skip_all)]
     fn handle_reality_skew(
         &mut self,
         _idx: usize,
@@ -258,6 +263,7 @@ where
         }
     }
 
+    #[instrument(name = "NM", skip_all)]
     fn handle_new_member(&mut self) -> Option<PollinationMessage> {
         if let Some(peer_id) = self.nucleus.propagate() {
             self.msg_seed(peer_id)
@@ -266,6 +272,7 @@ where
         }
     }
 
+    #[instrument(name = "SE", skip_all)]
     fn handle_seed(
         &mut self,
         _idx: usize,
@@ -275,17 +282,20 @@ where
         patch: BinaryPatch,
         new_id: IdTree,
     ) -> Option<PollinationMessage> {
-        // TODO: Handle error
-        self.nucleus = Nucleus::from_parts(new_id, peer_rt, patch);
-        if self.nucleus.set(self.own_info()) {
-            error!(
-                "PeerId's were removed when handling initial insert from seed. This is a sign of bug in stability of ID's."
-            );
+        if self.nucleus.reality_token() != peer_rt {
+            // TODO: Handle error
+            self.nucleus = Nucleus::from_parts(new_id, peer_rt, patch);
+            if self.nucleus.set(self.own_info()) {
+                error!(
+                    "PeerId's were removed when handling initial insert from seed. This is a sign of bug in stability of ID's."
+                );
+            }
         }
 
         self.msg_heartbeat()
     }
 
+    #[instrument(name = "SO", skip_all)]
     fn handle_see_other(
         &mut self,
         _idx: usize,
@@ -434,9 +444,9 @@ where
         self
     }
 
-    pub fn bloom(self) -> anyhow::Result<FlowerHandle> {
+    pub async fn bloom(self) -> anyhow::Result<FlowerHandle> {
         let mut engine = self.engine.expect("No engine");
-        engine.start();
+        engine.start().await;
 
         let flower = Flower {
             nucleus: Nucleus::new(),

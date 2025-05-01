@@ -40,7 +40,7 @@ serde_path_to_error = { version = "0.1.17", optional = true }
 
 [dev-dependencies]
 clap = { version = "4.5.35", features = ["derive"] }
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
 
 [build-dependencies]
 tonic-build = "0.12.3"
