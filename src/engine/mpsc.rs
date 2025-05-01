@@ -1,37 +1,35 @@
-use crate::constants::MPSC_CHANNEL_SIZE;
-use crate::engine::Engine;
+use crate::{constants::MPSC_CHANNEL_SIZE, ds::WalkieTalkie, engine::Engine};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock};
-use tokio::sync::mpsc::{self, Receiver, Sender};
-
-type FloraConn<T> = (Sender<T>, Receiver<T>);
-type EngineConn<T> = Sender<FloraConn<T>>;
-
-pub type World<T> = Arc<RwLock<Vec<EngineConn<T>>>>;
-
-pub fn new_world<T>() -> Arc<RwLock<Vec<EngineConn<T>>>> {
-    Arc::new(RwLock::new(vec![]))
-}
+use std::{
+    collections::VecDeque,
+    sync::{Arc, RwLock},
+};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 pub struct MpscEngine<T> {
-    world_view: World<T>,
-    own_idx: usize,
-    receiver: Receiver<FloraConn<T>>,
+    inner: Arc<RwLock<Inner<T>>>,
+    new_conn_rx: Receiver<WalkieTalkie<T, T>>,
+    addr: usize,
 }
 
 impl<T> MpscEngine<T> {
-    pub fn new(world_view: World<T>) -> Self {
-        let (own_idx, rx) = {
-            let mut world = world_view.write().expect("poisoned lock");
-            let (tx, rx) = mpsc::channel(MPSC_CHANNEL_SIZE);
-            world.push(tx);
-            (world.len() - 1, rx)
-        };
-
+    pub fn new(size: usize) -> Self {
+        let (_, rx) = channel(1);
         Self {
-            own_idx,
-            world_view,
-            receiver: rx,
+            inner: Arc::new(RwLock::new(Inner::new(size))),
+            new_conn_rx: rx,
+            addr: 0,
+        }
+    }
+
+    pub fn with_addr(&mut self, addr: usize) -> Self {
+        let mut inner = self.inner.write().expect("poisoned lock");
+        let new_conn_rx = inner.conns[addr].1.take().expect("addr reused");
+        info!("New at {addr}");
+        Self {
+            inner: self.inner.clone(),
+            new_conn_rx,
+            addr,
         }
     }
 }
@@ -43,30 +41,48 @@ where
     type Addr = usize;
 
     async fn start(&mut self) {
-        // pause for a moment in case you are spinning up multiple
-        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+        // NOP
     }
 
     fn addr(&self) -> &Self::Addr {
-        &self.own_idx
+        &self.addr
     }
 
     async fn create_conn(&mut self, addr: usize) -> (Sender<T>, Receiver<T>) {
-        let peer_tx = {
-            let world = self.world_view.read().expect("poisoned lock");
-
-            world[addr].clone()
+        let (tx, w0, w1) = {
+            let mut inner = self.inner.read().expect("poisoned lock");
+            let tx = inner.conns[addr].0.clone();
+            let (w0, w1) = WalkieTalkie::pair_with_buffer(inner.conns.len());
+            (tx, w0, w1)
         };
 
-        let (tx0, rx0) = mpsc::channel(MPSC_CHANNEL_SIZE);
-        let (tx1, rx1) = mpsc::channel(MPSC_CHANNEL_SIZE);
+        tx.send(w0).await.expect("Channel closed");
 
-        peer_tx.send((tx0, rx1)).await;
-
-        (tx1, rx0)
+        w1.split()
     }
 
     async fn get_new_conn(&mut self) -> Option<(Sender<T>, Receiver<T>)> {
-        self.receiver.recv().await
+        let w = self.new_conn_rx.recv().await?;
+        Some(w.split())
+    }
+}
+
+struct Inner<T> {
+    conns: Vec<(
+        Sender<WalkieTalkie<T, T>>,
+        Option<Receiver<WalkieTalkie<T, T>>>,
+    )>,
+}
+
+impl<T> Inner<T> {
+    fn new(size: usize) -> Self {
+        let conns = (0..size)
+            .map(|_| {
+                let (tx, rx) = channel(10);
+                (tx, Some(rx))
+            })
+            .collect();
+
+        Self { conns }
     }
 }

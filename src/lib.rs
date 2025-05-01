@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate tracing;
+
 mod constants;
 mod ds;
 mod handle;
@@ -12,4 +15,5 @@ pub mod message;
 pub mod pollinator;
 pub mod reality_token;
 
-pub use flower::Flower;
+pub use flower::{Flower, FlowerBuilder};
+pub use handle::FlowerHandle;

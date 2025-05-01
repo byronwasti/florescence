@@ -1,21 +1,27 @@
-use crate::connection::Connection;
-use crate::constants;
-use crate::ds::{StableVec, WalkieTalkie};
-use crate::engine::Engine;
-use crate::handle::FlowerHandle;
-use crate::message::{BinaryPatch, PollinationMessage};
-use crate::nucleus::{Nucleus, NucleusError};
-use crate::peer_info::PeerInfo;
-use crate::reality_token::RealityToken;
+use crate::{
+    connection::Connection,
+    constants,
+    ds::{StableVec, WalkieTalkie},
+    engine::Engine,
+    handle::FlowerHandle,
+    message::{BinaryPatch, PollinationMessage},
+    nucleus::{Nucleus, NucleusError},
+    peer_info::PeerInfo,
+    reality_token::RealityToken,
+};
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::fmt::{self, Debug};
-use std::hash::Hash;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use tokio::sync::mpsc::Receiver;
-use tokio::task::JoinSet;
-use tokio::time::{MissedTickBehavior, interval};
+use std::{
+    cmp::Ordering,
+    fmt::{self, Debug},
+    hash::Hash,
+    time::Duration,
+};
+use tokio::{
+    sync::mpsc::Receiver,
+    task::JoinSet,
+    time::{MissedTickBehavior, interval},
+};
+#[allow(unused)]
 use tracing::{Instrument, debug, error, info, instrument, trace, warn};
 use treeclocks::{EventTree, IdTree};
 
@@ -54,7 +60,7 @@ where
         let mut seed_list = std::mem::take(&mut self.seed_list);
         for addr in seed_list.drain(..) {
             if addr != *self.engine.addr() {
-                let (tx, rx) = self.engine.create_conn(addr).await;
+                let (tx, rx) = self.engine.create_conn(addr.clone()).await;
                 let idx = self.conns.push(Connection::new(tx));
                 self.spawn_receiver_loop(idx, rx);
             }
@@ -77,11 +83,11 @@ where
                 }
 
                 _ = self.handle_comm.recv() => {
-                    let _ = self.handle_comm.send(self.nucleus.clone());
+                    let _ = self.handle_comm.send(self.nucleus.clone()).await;
                 }
 
                 new_conn = self.engine.get_new_conn() => {
-                    if let Some((tx, mut rx)) = new_conn {
+                    if let Some((tx, rx)) = new_conn {
                         let idx = self.conns.push(Connection::new(tx));
                         self.spawn_receiver_loop(idx, rx);
                     } else {
@@ -99,7 +105,7 @@ where
                                 self.handle_msg(idx, msg).await;
                                 self.spawn_receiver_loop(idx, rx);
                             } else {
-                                error!("Msg was None; connection closed");
+                                error!("Msg was None; connection closed for {idx}");
                             }
                         }
                         Some(Err(err)) => {
@@ -281,20 +287,23 @@ where
     #[instrument(name = "SE", skip_all)]
     fn handle_seed(
         &mut self,
-        _idx: usize,
-        _peer_id: IdTree,
-        _peer_ts: EventTree,
+        idx: usize,
+        peer_id: IdTree,
+        peer_ts: EventTree,
         peer_rt: RealityToken,
         patch: BinaryPatch,
         new_id: IdTree,
     ) -> Option<PollinationMessage> {
         if self.nucleus.reality_token() != peer_rt {
-            // TODO: Handle error
-            self.nucleus = Nucleus::from_parts(new_id, peer_rt, patch);
-            if self.nucleus.set(self.own_info()) {
-                error!(
-                    "PeerId's were removed when handling initial insert from seed. This is a sign of bug in stability of ID's."
-                );
+            let msg = self.handle_update(idx, peer_id, peer_ts, peer_rt, patch.clone());
+            if matches!(msg, Some(PollinationMessage::RealitySkew { .. })) {
+                // TODO: Handle error
+                self.nucleus = Nucleus::from_parts(new_id, peer_rt, patch);
+                if self.nucleus.set(self.own_info()) {
+                    error!(
+                        "PeerId's were removed when handling initial insert from seed. This is a sign of bug in stability of ID's."
+                    );
+                }
             }
         }
 
@@ -310,7 +319,7 @@ where
         _peer_rt: RealityToken,
         _patch: BinaryPatch,
     ) -> Option<PollinationMessage> {
-        warn!("SeeOther not implemented.");
+        debug!("SeeOther not implemented.");
         // TODO: Needs a rethink
         /*
         // TODO: handle error

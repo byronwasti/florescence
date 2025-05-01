@@ -6,11 +6,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::time::Instant;
 use thiserror::Error;
-use tracing::{debug, info};
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 
 #[derive(Clone, Debug)]
-pub(crate) struct Nucleus<A> {
+pub struct Nucleus<A> {
     propagativity: Propagativity,
     reality_token: RealityToken,
     core_map: ItcMap<PeerInfo<A>>,
@@ -117,6 +116,24 @@ where
             self.core_map = new_core;
             Ok(())
         }
+    }
+}
+
+impl<A: fmt::Display> Nucleus<A> {
+    pub fn beautiful(&self) -> String {
+        let map: Vec<String> = self
+            .core_map
+            .iter()
+            .map(|(id, val)| format!("{id}: {val}"))
+            .collect();
+        let map = map.join(", ");
+        format!(
+            "{}\n\t{}\n\t{}\n\t{}",
+            self.propagativity,
+            self.reality_token,
+            self.core_map.timestamp(),
+            map,
+        )
     }
 }
 

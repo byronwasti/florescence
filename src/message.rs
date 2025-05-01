@@ -1,66 +1,6 @@
-use crate::peer_info::PeerInfo;
 use crate::reality_token::RealityToken;
 use serde::{Deserialize, Serialize};
-use treeclocks::{EventTree, IdTree, Patch};
-
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct BinaryPatch {
-    inner: Vec<u8>,
-}
-
-impl std::fmt::Display for BinaryPatch {
-    #[cfg(not(feature = "json"))]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "[")?;
-        for b in self.inner.iter() {
-            write!(f, "{b:02X} ")?;
-        }
-        write!(f, "]")?;
-
-        Ok(())
-    }
-
-    #[cfg(feature = "json")]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        let s = String::from_utf8(self.inner.clone()).map_err(|_| std::fmt::Error {})?;
-        write!(f, "{s}")
-    }
-}
-
-impl BinaryPatch {
-    #[cfg(not(feature = "json"))]
-    pub fn new<T: Serialize>(val: T) -> Result<Self, bincode::error::EncodeError> {
-        let inner = bincode::serde::encode_to_vec(val, bincode::config::standard())?;
-        Ok(Self { inner })
-    }
-
-    #[cfg(feature = "json")]
-    pub fn new<T: Serialize>(val: T) -> anyhow::Result<Self> {
-        let inner = serde_json::to_string(&val)?;
-        let inner = inner.into_bytes();
-        Ok(Self { inner })
-    }
-
-    #[cfg(not(feature = "json"))]
-    pub fn decode<T: for<'de> Deserialize<'de>>(self) -> Result<T, bincode::error::DecodeError> {
-        let (res, _) = bincode::serde::decode_from_slice(&self.inner, bincode::config::standard())?;
-        Ok(res)
-    }
-
-    #[cfg(feature = "json")]
-    pub fn decode<T: for<'de> Deserialize<'de>>(self) -> anyhow::Result<T> {
-        let s = String::from_utf8(self.inner)?;
-        let jd = &mut serde_json::Deserializer::from_str(&s);
-        let res = serde_path_to_error::deserialize(jd);
-        match res {
-            Ok(res) => Ok(res),
-            Err(err) => {
-                let path = err.path().to_string();
-                Err(err.into())
-            }
-        }
-    }
-}
+use treeclocks::{EventTree, IdTree};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum PollinationMessage {
@@ -194,6 +134,65 @@ impl std::fmt::Display for PollinationMessage {
                 patch,
             } => {
                 write!(f, "SO - {id} - {timestamp} - {reality_token} - {patch}")
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct BinaryPatch {
+    inner: Vec<u8>,
+}
+
+impl std::fmt::Display for BinaryPatch {
+    #[cfg(not(feature = "json"))]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "[")?;
+        for b in self.inner.iter() {
+            write!(f, "{b:02X} ")?;
+        }
+        write!(f, "]")?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "json")]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        let s = String::from_utf8(self.inner.clone()).map_err(|_| std::fmt::Error {})?;
+        write!(f, "{s}")
+    }
+}
+
+impl BinaryPatch {
+    #[cfg(not(feature = "json"))]
+    pub fn new<T: Serialize>(val: T) -> Result<Self, bincode::error::EncodeError> {
+        let inner = bincode::serde::encode_to_vec(val, bincode::config::standard())?;
+        Ok(Self { inner })
+    }
+
+    #[cfg(feature = "json")]
+    pub fn new<T: Serialize>(val: T) -> anyhow::Result<Self> {
+        let inner = serde_json::to_string(&val)?;
+        let inner = inner.into_bytes();
+        Ok(Self { inner })
+    }
+
+    #[cfg(not(feature = "json"))]
+    pub fn decode<T: for<'de> Deserialize<'de>>(self) -> Result<T, bincode::error::DecodeError> {
+        let (res, _) = bincode::serde::decode_from_slice(&self.inner, bincode::config::standard())?;
+        Ok(res)
+    }
+
+    #[cfg(feature = "json")]
+    pub fn decode<T: for<'de> Deserialize<'de>>(self) -> anyhow::Result<T> {
+        let s = String::from_utf8(self.inner)?;
+        let jd = &mut serde_json::Deserializer::from_str(&s);
+        let res = serde_path_to_error::deserialize(jd);
+        match res {
+            Ok(res) => Ok(res),
+            Err(err) => {
+                let path = err.path().to_string();
+                Err(err.into())
             }
         }
     }

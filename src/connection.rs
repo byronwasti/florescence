@@ -1,7 +1,7 @@
 use crate::constants;
 use crate::message::PollinationMessage;
 use std::time::Instant;
-use tokio::sync::mpsc::{Receiver, Sender, error::SendError};
+use tokio::sync::mpsc::{Sender, error::SendError};
 use tracing::debug;
 
 #[derive(Debug)]

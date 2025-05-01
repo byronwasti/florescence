@@ -16,6 +16,16 @@ impl<T, U> WalkieTalkie<T, U> {
         )
     }
 
+    pub fn pair_with_buffer(buffer: usize) -> (WalkieTalkie<T, U>, WalkieTalkie<U, T>) {
+        let (tx0, rx0): (Sender<T>, Receiver<T>) = channel(buffer);
+        let (tx1, rx1): (Sender<U>, Receiver<U>) = channel(buffer);
+
+        (
+            WalkieTalkie { tx: tx0, rx: rx1 },
+            WalkieTalkie { tx: tx1, rx: rx0 },
+        )
+    }
+
     pub async fn send_recv(&mut self, value: T) -> Option<U> {
         self.send(value).await.ok()?;
         self.recv().await
@@ -27,5 +37,9 @@ impl<T, U> WalkieTalkie<T, U> {
 
     pub async fn recv(&mut self) -> Option<U> {
         self.rx.recv().await
+    }
+
+    pub fn split(self) -> (Sender<T>, Receiver<U>) {
+        (self.tx, self.rx)
     }
 }
