@@ -12,7 +12,7 @@ use tokio::{task::JoinSet, time::interval};
 use tracing::{Instrument, info, instrument};
 use tracing_subscriber::FmtSubscriber;
 
-const N: usize = 3;
+const N: usize = 5;
 
 #[tokio::main]
 async fn main() -> Result<()> {

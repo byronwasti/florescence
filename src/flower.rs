@@ -270,7 +270,7 @@ where
                 }
             }
         } else {
-            warn!("Reality skew detected by peer, but not by self.");
+            debug!("Reality skew detected by peer, but not by self.");
             self.msg_heartbeat()
         }
     }
