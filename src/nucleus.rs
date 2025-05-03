@@ -1,5 +1,5 @@
 use crate::message::BinaryPatch;
-use crate::peer_info::PeerInfo;
+use crate::peer_info::{PeerInfo, PeerStatus};
 use crate::propagativity::Propagativity;
 use crate::reality_token::RealityToken;
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,11 @@ where
 {
     pub(crate) fn new() -> Self {
         Default::default()
+    }
+
+    pub(crate) fn own_info(&self) -> Option<&PeerInfo<A>> {
+        let id = self.propagativity.id()?;
+        self.core_map.get(id)
     }
 
     pub(crate) fn from_parts(id: IdTree, reality_token: RealityToken, patch: BinaryPatch) -> Self {
@@ -58,6 +63,29 @@ where
 
     pub(crate) fn reality_token(&self) -> RealityToken {
         self.reality_token
+    }
+
+    pub(crate) fn reap_souls(&mut self) -> Option<()> {
+        let dead_peers: IdTree = self.core_map.iter()
+            .filter_map(|(peer_id, peer_info)| {
+                // TODO: How to calculate timed-out peers?
+                if peer_info.status == PeerStatus::Dead {
+                    Some(peer_id.to_owned())
+                } else {
+                    None
+                }
+            })
+            .reduce(|acc, id| {
+                acc.join(id)
+            })?;
+
+        let new_id = claim_ids(dead_peers, self.id()?.clone());
+
+        let own_info = self.own_info()?.clone();
+        self.propagativity = Propagativity::Resting(new_id, Instant::now());
+        self.set(own_info);
+
+        Some(())
     }
 
     pub(crate) fn timestamp(&self) -> &EventTree {
@@ -171,6 +199,24 @@ pub(crate) enum NucleusError {
     #[error("Other: {0}")]
     Other(#[from] anyhow::Error),
 }
+
+fn claim_ids(dead_peers: IdTree, own: IdTree) -> IdTree {
+    use IdTree::*;
+    match (dead_peers, own) {
+        (Zero, o) => o,
+        (One, _) => One,
+        (_, o@Zero | o@One) => o,
+        (SubTree(l0, r0), SubTree(l1, r1)) => {
+            match ((*l0, *r0), (*l1, *r1)) {
+                ((One, Zero), (Zero, One)) | ((Zero, One), (One, Zero)) => {
+                    One
+                }
+                _ => panic!("Unexpected conditions")
+            }
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
