@@ -65,6 +65,7 @@ where
 }
 
 struct Inner<T> {
+    #[allow(clippy::type_complexity)]
     conns: Vec<(
         Sender<WalkieTalkie<T, T>>,
         Option<Receiver<WalkieTalkie<T, T>>>,

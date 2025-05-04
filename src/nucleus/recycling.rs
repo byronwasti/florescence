@@ -1,13 +1,13 @@
 use treeclocks::IdTree;
 
 pub fn claim_ids(own: IdTree, dead_peers: IdTree) -> IdTree {
-    let reclaim_tree = claim_ids_recurse(own, dead_peers, 0);
+    let reclaim_tree = claim_ids_recurse(own, dead_peers);
     convert(reclaim_tree)
 }
 
-fn claim_ids_recurse(own: IdTree, dead_peers: IdTree, depth: usize) -> IdReclaimTree {
+fn claim_ids_recurse(own: IdTree, dead_peers: IdTree) -> IdReclaimTree {
     use IdTree::*;
-    let res = match (own, dead_peers) {
+    match (own, dead_peers) {
         (Zero, Zero) => IdReclaimTree::Zero,
         (Zero, One) => IdReclaimTree::Dead,
         (One, Zero) => IdReclaimTree::One,
@@ -18,8 +18,8 @@ fn claim_ids_recurse(own: IdTree, dead_peers: IdTree, depth: usize) -> IdReclaim
 
         (SubTree(..), One) => panic!("Logic bug"),
         (SubTree(l, r), Zero) => {
-            let l = claim_ids_recurse(*l, Zero, depth + 1);
-            let r = claim_ids_recurse(*r, Zero, depth + 1);
+            let l = claim_ids_recurse(*l, Zero);
+            let r = claim_ids_recurse(*r, Zero);
             match (l, r) {
                 (l @ IdReclaimTree::TrendingLeft(..) | l @ IdReclaimTree::One, r) => {
                     IdReclaimTree::TrendingLeft(Box::new(l), Box::new(r))
@@ -31,18 +31,18 @@ fn claim_ids_recurse(own: IdTree, dead_peers: IdTree, depth: usize) -> IdReclaim
             }
         }
         (SubTree(l0, r0), SubTree(l1, r1)) => {
-            let l = claim_ids_recurse(*l0, *l1, depth + 1);
-            let r = claim_ids_recurse(*r0, *r1, depth + 1);
+            let l = claim_ids_recurse(*l0, *l1);
+            let r = claim_ids_recurse(*r0, *r1);
             use IdReclaimTree as Irt;
             match (l, r) {
                 (Irt::Dead, Irt::Dead) => panic!("Logic bug"),
                 (Irt::Dead | Irt::Zero, Irt::Dead | Irt::Zero) => Irt::Zero,
 
                 (Irt::One, Irt::Dead) | (Irt::Dead, Irt::One) => Irt::One,
-                (Irt::TrendingRight(l, r), Irt::Dead) => {
+                (Irt::TrendingRight(..), Irt::Dead) => {
                     Irt::SubTree(Box::new(Irt::Zero), Box::new(Irt::One))
                 }
-                (Irt::Dead, Irt::TrendingLeft(l, r)) => {
+                (Irt::Dead, Irt::TrendingLeft(..)) => {
                     Irt::SubTree(Box::new(Irt::One), Box::new(Irt::Zero))
                 }
 
@@ -64,9 +64,7 @@ fn claim_ids_recurse(own: IdTree, dead_peers: IdTree, depth: usize) -> IdReclaim
                 (l, r) => Irt::SubTree(Box::new(l), Box::new(r)),
             }
         }
-    };
-
-    res
+    }
 }
 
 fn convert(irt: IdReclaimTree) -> IdTree {

@@ -46,7 +46,7 @@ where
         let _ = core_map.apply(patch);
 
         let uuid = Uuid::new_v4();
-        reality_token.increment(uuid);
+        reality_token.push(uuid);
 
         Self {
             propagativity,
@@ -62,7 +62,7 @@ where
             let mut removals = self.core_map.insert(id.clone(), own_info);
             for (_, info) in removals.drain(..) {
                 any_removed = true;
-                self.reality_token.increment(info.uuid);
+                self.reality_token.push(info.uuid);
             }
         }
         any_removed
@@ -83,13 +83,12 @@ where
     }
 
     #[allow(unused)]
-    fn recalculate_reality_token(&self) -> Option<RealityToken> {
-        let mut reality_token = RealityToken::new(self.uuid);
+    fn recalculate_reality_token(&self) -> RealityToken {
+        let mut reality_token = RealityToken::default();
         for (_, val) in self.core_map.iter() {
-            reality_token.increment(val.uuid);
+            reality_token.push(val.uuid);
         }
-
-        Some(reality_token)
+        reality_token
     }
 
     #[allow(unused)]
@@ -158,10 +157,10 @@ where
 
         let (mut additions, mut removals) = new_core.apply(patch);
         for (_, info) in removals.drain(..) {
-            new_rt.increment(info.uuid);
+            new_rt.push(info.uuid);
         }
         for (_, info) in additions.drain(..) {
-            new_rt.increment(info.uuid);
+            new_rt.push(info.uuid);
         }
 
         if new_rt != peer_rt {
