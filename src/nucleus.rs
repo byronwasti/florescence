@@ -107,7 +107,7 @@ where
             })
             .reduce(|acc, id| acc.join(id))?;
 
-        let new_id = recycling::claim_ids(dead_peers, self.id()?.clone());
+        let new_id = recycling::claim_ids(self.id()?.clone(), dead_peers);
 
         let own_info = self.own_info()?.clone();
         self.propagativity = Propagativity::Resting(new_id, Instant::now());
