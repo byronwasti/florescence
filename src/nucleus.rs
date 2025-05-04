@@ -7,12 +7,16 @@ use std::fmt;
 use std::time::Instant;
 use thiserror::Error;
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
+use uuid::Uuid;
+
+mod recycling;
 
 #[derive(Clone, Debug)]
 pub struct Nucleus<A> {
     propagativity: Propagativity,
     reality_token: RealityToken,
     core_map: ItcMap<PeerInfo<A>>,
+    uuid: Uuid,
 }
 
 impl<A> Nucleus<A>
@@ -23,12 +27,17 @@ where
         Default::default()
     }
 
+    #[allow(unused)]
     pub(crate) fn own_info(&self) -> Option<&PeerInfo<A>> {
         let id = self.propagativity.id()?;
         self.core_map.get(id)
     }
 
-    pub(crate) fn from_parts(id: IdTree, reality_token: RealityToken, patch: BinaryPatch) -> Self {
+    pub(crate) fn from_parts(
+        id: IdTree,
+        mut reality_token: RealityToken,
+        patch: BinaryPatch,
+    ) -> Self {
         // TODO: Handle error
         let patch: Patch<PeerInfo<A>> = patch.decode().expect("Error deserializing patch");
         let propagativity = Propagativity::Resting(id.clone(), Instant::now());
@@ -36,10 +45,14 @@ where
         let mut core_map = ItcMap::new();
         let _ = core_map.apply(patch);
 
+        let uuid = Uuid::new_v4();
+        reality_token.increment(uuid);
+
         Self {
             propagativity,
             reality_token,
             core_map,
+            uuid,
         }
     }
 
@@ -47,9 +60,9 @@ where
         let mut any_removed = false;
         if let Some(id) = self.propagativity.id() {
             let mut removals = self.core_map.insert(id.clone(), own_info);
-            for (id, _) in removals.drain(..) {
+            for (_, info) in removals.drain(..) {
                 any_removed = true;
-                self.reality_token.increment(id);
+                self.reality_token.increment(info.uuid);
             }
         }
         any_removed
@@ -61,12 +74,29 @@ where
         }
     }
 
+    pub(crate) fn uuid(&self) -> Uuid {
+        self.uuid
+    }
+
     pub(crate) fn reality_token(&self) -> RealityToken {
         self.reality_token
     }
 
+    #[allow(unused)]
+    fn recalculate_reality_token(&self) -> Option<RealityToken> {
+        let mut reality_token = RealityToken::new(self.uuid);
+        for (_, val) in self.core_map.iter() {
+            reality_token.increment(val.uuid);
+        }
+
+        Some(reality_token)
+    }
+
+    #[allow(unused)]
     pub(crate) fn reap_souls(&mut self) -> Option<()> {
-        let dead_peers: IdTree = self.core_map.iter()
+        let dead_peers: IdTree = self
+            .core_map
+            .iter()
             .filter_map(|(peer_id, peer_info)| {
                 // TODO: How to calculate timed-out peers?
                 if peer_info.status == PeerStatus::Dead {
@@ -75,11 +105,9 @@ where
                     None
                 }
             })
-            .reduce(|acc, id| {
-                acc.join(id)
-            })?;
+            .reduce(|acc, id| acc.join(id))?;
 
-        let new_id = claim_ids(dead_peers, self.id()?.clone());
+        let new_id = recycling::claim_ids(dead_peers, self.id()?.clone());
 
         let own_info = self.own_info()?.clone();
         self.propagativity = Propagativity::Resting(new_id, Instant::now());
@@ -128,9 +156,12 @@ where
             std::mem::take(&mut self.core_map)
         };
 
-        let mut removals = new_core.apply(patch);
-        for (id, _) in removals.drain(..) {
-            new_rt.increment(id);
+        let (mut additions, mut removals) = new_core.apply(patch);
+        for (_, info) in removals.drain(..) {
+            new_rt.increment(info.uuid);
+        }
+        for (_, info) in additions.drain(..) {
+            new_rt.increment(info.uuid);
         }
 
         if new_rt != peer_rt {
@@ -167,10 +198,12 @@ impl<A: fmt::Display> Nucleus<A> {
 
 impl<A> Default for Nucleus<A> {
     fn default() -> Self {
+        let uuid = Uuid::new_v4();
         Self {
             propagativity: Propagativity::Propagating(IdTree::One),
-            reality_token: RealityToken::new(),
+            reality_token: RealityToken::new(uuid),
             core_map: ItcMap::new(),
+            uuid,
         }
     }
 }
@@ -199,24 +232,6 @@ pub(crate) enum NucleusError {
     #[error("Other: {0}")]
     Other(#[from] anyhow::Error),
 }
-
-fn claim_ids(dead_peers: IdTree, own: IdTree) -> IdTree {
-    use IdTree::*;
-    match (dead_peers, own) {
-        (Zero, o) => o,
-        (One, _) => One,
-        (_, o@Zero | o@One) => o,
-        (SubTree(l0, r0), SubTree(l1, r1)) => {
-            match ((*l0, *r0), (*l1, *r1)) {
-                ((One, Zero), (Zero, One)) | ((Zero, One), (One, Zero)) => {
-                    One
-                }
-                _ => panic!("Unexpected conditions")
-            }
-        }
-    }
-}
-
 
 #[cfg(test)]
 mod tests {

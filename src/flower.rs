@@ -303,6 +303,7 @@ where
                     error!(
                         "PeerId's were removed when handling initial insert from seed. This is a sign of bug in stability of ID's."
                     );
+                    panic!("Core logic bug");
                 }
             }
         }
@@ -408,7 +409,7 @@ where
     }
 
     fn own_info(&self) -> PeerInfo<E::Addr> {
-        PeerInfo::new(self.engine.addr().clone())
+        PeerInfo::new(self.nucleus.uuid(), self.engine.addr().clone())
     }
 }
 

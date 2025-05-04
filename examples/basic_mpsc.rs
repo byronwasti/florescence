@@ -12,13 +12,13 @@ use tokio::{task::JoinSet, time::interval};
 use tracing::{Instrument, info, instrument};
 use tracing_subscriber::FmtSubscriber;
 
-const N: usize = 5;
+const N: usize = 2;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     FmtSubscriber::builder()
         //.json()
-        .with_env_filter("basic=debug,florescence=info,treeclocks=trace")
+        .with_env_filter("basic=debug,florescence=debug,treeclocks=trace")
         .with_line_number(true)
         .with_ansi(false)
         .init();

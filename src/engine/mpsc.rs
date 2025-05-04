@@ -1,9 +1,6 @@
-use crate::{constants::MPSC_CHANNEL_SIZE, ds::WalkieTalkie, engine::Engine};
+use crate::{ds::WalkieTalkie, engine::Engine};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::VecDeque,
-    sync::{Arc, RwLock},
-};
+use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 pub struct MpscEngine<T> {
@@ -50,7 +47,7 @@ where
 
     async fn create_conn(&mut self, addr: usize) -> (Sender<T>, Receiver<T>) {
         let (tx, w0, w1) = {
-            let mut inner = self.inner.read().expect("poisoned lock");
+            let inner = self.inner.read().expect("poisoned lock");
             let tx = inner.conns[addr].0.clone();
             let (w0, w1) = WalkieTalkie::pair_with_buffer(inner.conns.len());
             (tx, w0, w1)
