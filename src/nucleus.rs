@@ -57,15 +57,26 @@ where
     }
 
     pub(crate) fn set(&mut self, own_info: PeerInfo<A>) -> bool {
-        let mut any_removed = false;
         if let Some(id) = self.propagativity.id() {
-            let mut removals = self.core_map.insert(id.clone(), own_info);
-            for (_, info) in removals.drain(..) {
-                any_removed = true;
-                self.reality_token.push(info.uuid);
-            }
+            self.insert(id.clone(), own_info)
+        } else {
+            false
+        }
+    }
+
+    fn insert(&mut self, id: IdTree, info: PeerInfo<A>) -> bool {
+        self.reality_token.push(info.uuid);
+        let mut any_removed = false;
+        let mut removals = self.core_map.insert(id, info);
+        for (_, info) in removals.drain(..) {
+            any_removed = true;
+            self.reality_token.push(info.uuid);
         }
         any_removed
+    }
+
+    pub(crate) fn mark_dead(&mut self, dead_id: IdTree) {
+        self.insert(dead_id, PeerInfo::dead());
     }
 
     pub(crate) fn bump(&mut self) {
@@ -214,8 +225,8 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
-            "{} - {} - {}",
-            self.propagativity, self.reality_token, self.core_map
+            "id:{} - rt:{} - uuid:{} - map:{}",
+            self.propagativity, self.reality_token, self.uuid, self.core_map
         )
     }
 }

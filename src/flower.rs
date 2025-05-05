@@ -294,8 +294,12 @@ where
         patch: BinaryPatch,
         new_id: IdTree,
     ) -> Option<PollinationMessage> {
-        if self.nucleus.reality_token() != peer_rt {
-            let msg = self.handle_update(idx, peer_id, peer_ts, peer_rt, patch.clone());
+        if self.nucleus.reality_token() == peer_rt {
+            self.nucleus.mark_dead(new_id);
+            let patch = self.nucleus.create_patch(&peer_ts);
+            self.msg_update(patch)
+        } else {
+            let msg = self.handle_update(idx, peer_id, peer_ts.clone(), peer_rt, patch.clone());
             if matches!(msg, Some(PollinationMessage::RealitySkew { .. })) {
                 // TODO: Handle error
                 self.nucleus = Nucleus::from_parts(new_id, peer_rt, patch);
@@ -306,9 +310,10 @@ where
                     panic!("Core logic bug");
                 }
             }
-        }
 
-        self.msg_heartbeat()
+            let patch = self.nucleus.create_patch(&peer_ts);
+            self.msg_update(patch)
+        }
     }
 
     #[instrument(name = "SO", skip_all)]
