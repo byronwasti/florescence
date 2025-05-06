@@ -6,6 +6,7 @@ pub fn claim_ids(own: IdTree, dead_peers: IdTree) -> IdTree {
 }
 
 fn claim_ids_recurse(own: IdTree, dead_peers: IdTree) -> IdReclaimTree {
+    println!("{own} : {dead_peers}");
     use IdTree::*;
     match (own, dead_peers) {
         (Zero, Zero) => IdReclaimTree::Zero,
@@ -170,5 +171,47 @@ mod tests {
         let new_id = claim_ids(i0, i1);
 
         assert_eq!(new_id.to_string(), "(0, 1)".to_string());
+    }
+
+    #[test]
+    fn test_no_reclaim() {
+        use IdTree::*;
+
+        let i0 = SubTree(
+            Box::new(SubTree(
+                Box::new(Zero),
+                Box::new(SubTree(Box::new(One), Box::new(Zero))),
+            )),
+            Box::new(Zero),
+        );
+        let i1 = SubTree(Box::new(Zero), Box::new(One));
+
+        let new_id = claim_ids(i0, i1);
+
+        assert_eq!(new_id.to_string(), "((0, (1, 0)), 0)".to_string());
+    }
+
+    #[test]
+    fn some_reclaim() {
+        use IdTree::*;
+
+        let i0 = SubTree(
+            Box::new(SubTree(
+                Box::new(Zero),
+                Box::new(SubTree(Box::new(One), Box::new(Zero))),
+            )),
+            Box::new(Zero),
+        );
+        let i1 = SubTree(
+            Box::new(SubTree(
+                Box::new(Zero),
+                Box::new(SubTree(Box::new(Zero), Box::new(One))),
+            )),
+            Box::new(One),
+        );
+
+        let new_id = claim_ids(i0, i1);
+
+        assert_eq!(new_id.to_string(), "((0, 1), 0)".to_string());
     }
 }

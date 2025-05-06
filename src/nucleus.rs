@@ -33,6 +33,17 @@ where
         self.core_map.get(id)
     }
 
+    pub(crate) fn reset(&mut self, id: IdTree, patch: BinaryPatch) {
+        // TODO: Handle error
+        let patch: Patch<PeerInfo<A>> = patch.decode().expect("Error deserializing patch");
+        self.propagativity = Propagativity::Resting(id.clone(), Instant::now());
+
+        let mut core_map = ItcMap::new();
+        let _ = core_map.apply(patch);
+        self.core_map = core_map;
+        self.reality_token = self.recalculate_reality_token();
+    }
+
     pub(crate) fn from_parts(
         id: IdTree,
         mut reality_token: RealityToken,
@@ -56,8 +67,9 @@ where
         }
     }
 
-    pub(crate) fn set(&mut self, own_info: PeerInfo<A>) -> bool {
+    pub(crate) fn set(&mut self, addr: A) -> bool {
         if let Some(id) = self.propagativity.id() {
+            let own_info = PeerInfo::new(self.uuid, addr);
             self.insert(id.clone(), own_info)
         } else {
             false
@@ -85,16 +97,12 @@ where
         }
     }
 
-    pub(crate) fn uuid(&self) -> Uuid {
-        self.uuid
-    }
-
     pub(crate) fn reality_token(&self) -> RealityToken {
         self.reality_token
     }
 
     #[allow(unused)]
-    fn recalculate_reality_token(&self) -> RealityToken {
+    pub(crate) fn recalculate_reality_token(&self) -> RealityToken {
         let mut reality_token = RealityToken::default();
         for (_, val) in self.core_map.iter() {
             reality_token.push(val.uuid);
@@ -119,11 +127,16 @@ where
 
         let new_id = recycling::claim_ids(self.id()?.clone(), dead_peers);
 
-        let own_info = self.own_info()?.clone();
-        self.propagativity = Propagativity::Resting(new_id, Instant::now());
-        self.set(own_info);
-
-        Some(())
+        if &new_id != self.id()? {
+            info!("BYRON =>> Reclaimed Id: {new_id}");
+            let own_addr = self.own_info()?.clone().addr?;
+            self.propagativity = Propagativity::Resting(new_id, Instant::now());
+            self.set(own_addr);
+            Some(())
+        } else {
+            info!("BYRON =>> No Reclaim");
+            None
+        }
     }
 
     pub(crate) fn timestamp(&self) -> &EventTree {
@@ -140,10 +153,9 @@ where
 
     pub(crate) fn propagate(&mut self) -> Option<IdTree> {
         let id = self.propagativity.id()?;
-        let own_info = self.core_map.get(id)?.clone();
-
+        let own_addr = self.core_map.get(id)?.clone().addr?;
         let peer_id = self.propagativity.propagate()?;
-        self.set(own_info);
+        self.set(own_addr);
 
         Some(peer_id)
     }
@@ -168,6 +180,9 @@ where
 
         let (mut additions, mut removals) = new_core.apply(patch);
         for (_, info) in removals.drain(..) {
+            if info.uuid == self.uuid {
+                return Err(NucleusError::RealitySkew);
+            }
             new_rt.push(info.uuid);
         }
         for (_, info) in additions.drain(..) {
@@ -197,8 +212,9 @@ impl<A: fmt::Display> Nucleus<A> {
             .collect();
         let map = map.join(", ");
         format!(
-            "{}\n\t{}\n\t{}\n\t{}",
+            "{}\n\tuuid:{}\n\trt:{}\n\tts:{}\n\t{}",
             self.propagativity,
+            self.uuid,
             self.reality_token,
             self.core_map.timestamp(),
             map,
@@ -209,9 +225,10 @@ impl<A: fmt::Display> Nucleus<A> {
 impl<A> Default for Nucleus<A> {
     fn default() -> Self {
         let uuid = Uuid::new_v4();
+        let reality_token = RealityToken::default();
         Self {
             propagativity: Propagativity::Propagating(IdTree::One),
-            reality_token: RealityToken::new(uuid),
+            reality_token,
             core_map: ItcMap::new(),
             uuid,
         }
@@ -249,23 +266,24 @@ mod tests {
 
     #[test]
     fn test_nucleus() {
+        let n0_uuid = Uuid::new_v4();
         let mut n0 = Nucleus::new();
-        n0.set(PeerInfo::new(10));
+        n0.set(10);
         assert_eq!(n0.timestamp().to_string(), "1".to_string());
 
         let peer_id = n0.propagate().unwrap();
-        n0.set(PeerInfo::new(11));
         assert_eq!(n0.timestamp().to_string(), "(1, 1, 0)".to_string());
 
         let patch = n0.create_patch(&EventTree::new());
-        n0.set(PeerInfo::new(12));
+        n0.set(12);
         assert_eq!(n0.timestamp().to_string(), "(1, 2, 0)".to_string());
 
+        let n1_uuid = Uuid::new_v4();
         let mut n1 = Nucleus::<usize>::from_parts(peer_id, n0.reality_token(), patch);
-        n1.set(PeerInfo::new(0));
-        n1.set(PeerInfo::new(1));
+        n1.set(0);
+        n1.set(1);
 
-        assert_eq!(n1.timestamp().to_string(), "(3, 0, 1)".to_string());
+        assert_eq!(n1.timestamp().to_string(), "(2, 0, 1)".to_string());
         assert_eq!(n0.timestamp().to_string(), "(1, 2, 0)".to_string());
     }
 }
