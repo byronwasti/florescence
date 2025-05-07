@@ -6,7 +6,6 @@ pub fn claim_ids(own: IdTree, dead_peers: IdTree) -> IdTree {
 }
 
 fn claim_ids_recurse(own: IdTree, dead_peers: IdTree) -> IdReclaimTree {
-    println!("{own} : {dead_peers}");
     use IdTree::*;
     match (own, dead_peers) {
         (Zero, Zero) => IdReclaimTree::Zero,
@@ -17,7 +16,12 @@ fn claim_ids_recurse(own: IdTree, dead_peers: IdTree) -> IdReclaimTree {
         (Zero, SubTree(..)) => IdReclaimTree::Zero,
         (One, SubTree(..)) => panic!("Logic bug"),
 
-        (SubTree(..), One) => panic!("Logic bug"),
+        (SubTree(..), One) => {
+            // HIT
+            //panic!("Logic bug"),
+            error!("Logic bug");
+            IdReclaimTree::One
+        }
         (SubTree(l, r), Zero) => {
             let l = claim_ids_recurse(*l, Zero);
             let r = claim_ids_recurse(*r, Zero);

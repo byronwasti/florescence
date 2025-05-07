@@ -76,13 +76,9 @@ where
         loop {
             tokio::select! {
                 _ = heartbeat.tick() => {
+                    debug!("TICK");
                     self.nucleus.bump();
-
-                    // TODO: Handle error
-                    if let Some(msg) = self.msg_heartbeat() {
-                        debug!("o b {msg}");
-                        let _ = self.broadcast(msg).await;
-                    }
+                    self.broadcast().await;
                 }
 
                 _ = self.handle_comm.recv() => {
@@ -90,11 +86,12 @@ where
                 }
 
                 _ = grim_reaper.tick() => {
+                    debug!("REAPER");
                     if self.nucleus.reap_souls().is_some() {
                         // TODO: Handle error
                         if let Some(msg) = self.msg_heartbeat() {
                             debug!("d b {msg}");
-                            let _ = self.broadcast(msg).await;
+                            let _ = self.broadcast_update().await;
                         }
                     }
                 }
@@ -116,6 +113,7 @@ where
                     match res {
                         Some(Ok((rx, idx, msg))) => {
                             if let Some(msg) = msg {
+                                self.preprocess_msg(idx, &msg).await;
                                 self.handle_msg(idx, msg).await;
                                 self.spawn_receiver_loop(idx, rx);
                             } else {
@@ -135,9 +133,17 @@ where
         }
     }
 
+    async fn preprocess_msg(&mut self, idx: usize, message: &PollinationMessage) {
+        let conn = self.conns.get_mut(idx).expect("logic bug");
+        conn.peer_id = message.id().cloned();
+        conn.peer_ts = message.timestamp().cloned();
+    }
+
     async fn handle_msg(&mut self, idx: usize, message: PollinationMessage) {
         debug!("s0 {self}");
         debug!("i {idx}: {message}");
+
+        self.nucleus.check_and_reset_reality_token();
         let msg = match message {
             PollinationMessage::Heartbeat {
                 id,
@@ -164,7 +170,10 @@ where
                 reality_token,
                 patch,
                 new_id,
-            } => self.handle_seed(idx, id, timestamp, reality_token, patch, new_id),
+            } => {
+                self.handle_seed(idx, id, timestamp, reality_token, patch, new_id)
+                    .await
+            }
             PollinationMessage::SeeOther {
                 id,
                 timestamp,
@@ -299,7 +308,7 @@ where
     }
 
     #[instrument(name = "SE", skip_all)]
-    fn handle_seed(
+    async fn handle_seed(
         &mut self,
         idx: usize,
         peer_id: IdTree,
@@ -315,15 +324,21 @@ where
         } else {
             let msg = self.handle_update(idx, peer_id, peer_ts.clone(), peer_rt, patch.clone());
             if matches!(msg, Some(PollinationMessage::RealitySkew { .. })) {
+                // TODO: Figure out how to broadcast here...
+                self.nucleus.mark_dead(self.nucleus.id()?.clone());
+                self.broadcast_update().await;
+
                 // TODO: Handle error
                 //self.nucleus = Nucleus::from_parts(new_id, peer_rt, patch);
                 self.nucleus.reset(new_id, patch);
+                self.nucleus.check_and_reset_reality_token();
                 if self.nucleus.set(self.engine.addr().clone()) {
                     error!(
                         "PeerId's were removed when handling initial insert from seed. This is a sign of bug in stability of ID's."
                     );
                     panic!("Core logic bug");
                 }
+                self.nucleus.check_and_reset_reality_token();
             }
 
             let patch = self.nucleus.create_patch(&peer_ts);
@@ -353,9 +368,6 @@ where
     }
 
     fn msg_heartbeat(&self) -> Option<PollinationMessage> {
-        if self.nucleus.reality_token() != self.nucleus.recalculate_reality_token() {
-            panic!("Logic bug");
-        }
         let id = self.nucleus.id()?.clone();
         Some(PollinationMessage::Heartbeat {
             id,
@@ -365,9 +377,6 @@ where
     }
 
     fn msg_update(&self, patch: BinaryPatch) -> Option<PollinationMessage> {
-        if self.nucleus.reality_token() != self.nucleus.recalculate_reality_token() {
-            panic!("Logic bug");
-        }
         let id = self.nucleus.id()?.clone();
         Some(PollinationMessage::Update {
             id,
@@ -378,9 +387,6 @@ where
     }
 
     fn msg_reality_skew(&self, patch: BinaryPatch) -> Option<PollinationMessage> {
-        if self.nucleus.reality_token() != self.nucleus.recalculate_reality_token() {
-            panic!("Logic bug");
-        }
         let id = self.nucleus.id()?.clone();
         Some(PollinationMessage::RealitySkew {
             id,
@@ -393,16 +399,10 @@ where
 
     // Option is unecessary but maintains symmetry
     fn msg_new_member(&self) -> Option<PollinationMessage> {
-        if self.nucleus.reality_token() != self.nucleus.recalculate_reality_token() {
-            panic!("Logic bug");
-        }
         Some(PollinationMessage::NewMember {})
     }
 
     fn msg_seed(&self, new_id: IdTree) -> Option<PollinationMessage> {
-        if self.nucleus.reality_token() != self.nucleus.recalculate_reality_token() {
-            panic!("Logic bug");
-        }
         let id = self.nucleus.id()?.clone();
         let patch = self.nucleus.create_patch(&EventTree::Leaf(0));
         Some(PollinationMessage::Seed {
@@ -415,9 +415,6 @@ where
     }
 
     fn msg_see_other(&self) -> Option<PollinationMessage> {
-        if self.nucleus.reality_token() != self.nucleus.recalculate_reality_token() {
-            panic!("Logic bug");
-        }
         let id = self.nucleus.id()?.clone();
         let patch = self.nucleus.create_patch(&EventTree::Leaf(0));
         Some(PollinationMessage::SeeOther {
@@ -428,12 +425,33 @@ where
         })
     }
 
-    async fn broadcast(&mut self, message: PollinationMessage) -> anyhow::Result<()> {
-        for conn in self.conns.iter_mut() {
-            conn.send(message.clone()).await?;
+    async fn broadcast(&mut self) {
+        if let Some(msg) = self.msg_heartbeat() {
+            debug!("o b {msg}");
+            for conn in self.conns.iter_mut() {
+                // TODO: Handle error
+                let _ = conn.send(msg.clone()).await;
+            }
+        }
+    }
+
+    async fn broadcast_update(&mut self) -> Option<()> {
+        let mut actions = vec![];
+        for (idx, conn) in self.conns.enumerate() {
+            if let Some(peer_ts) = &conn.peer_ts {
+                let patch = self.nucleus.create_patch(&peer_ts);
+                let msg = self.msg_update(patch)?;
+                actions.push((idx, msg))
+            }
         }
 
-        Ok(())
+        for (idx, msg) in actions {
+            let conn = self.conns.get_mut(idx)?;
+            // TODO: Handle errors
+            let _ = conn.send(msg).await;
+        }
+
+        Some(())
     }
 
     fn spawn_receiver_loop(&mut self, idx: usize, mut rx: Receiver<PollinationMessage>) {

@@ -55,6 +55,19 @@ impl PollinationMessage {
             | Seed { timestamp, .. } => Some(timestamp),
         }
     }
+
+    pub fn id(&self) -> Option<&IdTree> {
+        use PollinationMessage::*;
+        match self {
+            NewMember {} => None,
+            Heartbeat { id, .. }
+            | Update { id, .. }
+            | RealitySkew { id, .. }
+            | SeeOther { id, .. }
+            | Seed { id, .. } => Some(id),
+        }
+    }
+
     pub fn light_clone(&self) -> Self {
         let mut new = self.clone();
         // Assuming the compiler will optimize away the clone

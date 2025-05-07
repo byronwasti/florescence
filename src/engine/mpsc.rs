@@ -49,7 +49,7 @@ where
         let (tx, w0, w1) = {
             let inner = self.inner.read().expect("poisoned lock");
             let tx = inner.conns[addr].0.clone();
-            let (w0, w1) = WalkieTalkie::pair_with_buffer(inner.conns.len());
+            let (w0, w1) = WalkieTalkie::pair_with_buffer(inner.conns.len() * 4);
             (tx, w0, w1)
         };
 

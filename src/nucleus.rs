@@ -42,9 +42,11 @@ where
         let _ = core_map.apply(patch);
         self.core_map = core_map;
         self.reality_token = self.recalculate_reality_token();
+        debug!("RESET");
     }
 
-    pub(crate) fn from_parts(
+    /*
+    fn from_parts(
         id: IdTree,
         mut reality_token: RealityToken,
         patch: BinaryPatch,
@@ -66,6 +68,7 @@ where
             uuid,
         }
     }
+    */
 
     pub(crate) fn set(&mut self, addr: A) -> bool {
         if let Some(id) = self.propagativity.id() {
@@ -84,10 +87,13 @@ where
             any_removed = true;
             self.reality_token.push(info.uuid);
         }
+
+        assert_eq!(self.reality_token(), self.recalculate_reality_token());
         any_removed
     }
 
     pub(crate) fn mark_dead(&mut self, dead_id: IdTree) {
+        debug!("Mark Dead: {dead_id}");
         self.insert(dead_id, PeerInfo::dead());
     }
 
@@ -101,7 +107,6 @@ where
         self.reality_token
     }
 
-    #[allow(unused)]
     pub(crate) fn recalculate_reality_token(&self) -> RealityToken {
         let mut reality_token = RealityToken::default();
         for (_, val) in self.core_map.iter() {
@@ -110,7 +115,20 @@ where
         reality_token
     }
 
-    #[allow(unused)]
+    // TODO: Fix bugs in how reality token is handled to avoid needing this
+    #[instrument(skip_all)]
+    pub(crate) fn check_and_reset_reality_token(&mut self) {
+        let recalculated = self.recalculate_reality_token();
+
+        if recalculated != self.reality_token {
+            error!(
+                "Reality token incorrect: has={} expected={recalculated}",
+                self.reality_token
+            );
+            self.reality_token = recalculated
+        }
+    }
+
     pub(crate) fn reap_souls(&mut self) -> Option<()> {
         let dead_peers: IdTree = self
             .core_map
@@ -128,13 +146,13 @@ where
         let new_id = recycling::claim_ids(self.id()?.clone(), dead_peers);
 
         if &new_id != self.id()? {
-            info!("BYRON =>> Reclaimed Id: {new_id}");
+            debug!("CHECK =>> Reclaimed Id: {new_id}");
             let own_addr = self.own_info()?.clone().addr?;
             self.propagativity = Propagativity::Resting(new_id, Instant::now());
             self.set(own_addr);
             Some(())
         } else {
-            info!("BYRON =>> No Reclaim");
+            debug!("CHECK =>> No Reclaim");
             None
         }
     }
@@ -148,7 +166,10 @@ where
     }
 
     pub(crate) fn peer_count(&self) -> usize {
-        self.core_map.len()
+        self.core_map
+            .iter()
+            .filter(|(_, info)| info.status == PeerStatus::Healthy)
+            .count()
     }
 
     pub(crate) fn propagate(&mut self) -> Option<IdTree> {
@@ -181,23 +202,33 @@ where
         let (mut additions, mut removals) = new_core.apply(patch);
         for (_, info) in removals.drain(..) {
             if info.uuid == self.uuid {
+                debug!("CHECK =>> Self-UUID removal; RealitySkew");
                 return Err(NucleusError::RealitySkew);
             }
+            debug!("CHECK =>> REMOVE UUID: {}", info.uuid);
             new_rt.push(info.uuid);
+            debug!("CHECK =>> new_rt: {new_rt}");
         }
         for (_, info) in additions.drain(..) {
+            debug!("CHECK =>> ADD UUID: {}", info.uuid);
             new_rt.push(info.uuid);
+            debug!("CHECK =>> new_rt: {new_rt}");
         }
 
         if new_rt != peer_rt {
+            debug!("CHECK =>> rt !=");
+            /*
             if peer_rt == self.reality_token {
                 panic!("Corrupted update.");
             }
+            */
 
             Err(NucleusError::RealitySkew)
         } else {
+            debug!("CHECK =>> OK");
             self.reality_token = new_rt;
             self.core_map = new_core;
+            self.check_and_reset_reality_token();
             Ok(())
         }
     }

@@ -3,16 +3,24 @@ use crate::message::PollinationMessage;
 use std::time::Instant;
 use tokio::sync::mpsc::{Sender, error::SendError};
 use tracing::debug;
+use treeclocks::{EventTree, IdTree};
 
 #[derive(Debug)]
 pub struct Connection {
+    pub(crate) peer_id: Option<IdTree>,
+    pub(crate) peer_ts: Option<EventTree>,
     pub(crate) prev_msg: Option<(PollinationMessage, Instant)>,
     tx: Sender<PollinationMessage>,
 }
 
 impl Connection {
     pub fn new(tx: Sender<PollinationMessage>) -> Self {
-        Self { prev_msg: None, tx }
+        Self {
+            tx,
+            prev_msg: None,
+            peer_id: None,
+            peer_ts: None,
+        }
     }
 
     pub async fn send(

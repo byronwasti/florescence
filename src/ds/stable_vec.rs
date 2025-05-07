@@ -35,6 +35,13 @@ impl<T> StableVec<T> {
         self.inner.iter_mut().filter_map(|x| x.as_mut())
     }
 
+    pub fn enumerate(&self) -> impl Iterator<Item = (usize, &T)> {
+        self.inner
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, t)| t.as_ref().map(|x| (idx, x)))
+    }
+
     pub fn remove(&mut self, index: usize) -> Option<T> {
         let val = self.inner.get_mut(index)?;
         val.take()
