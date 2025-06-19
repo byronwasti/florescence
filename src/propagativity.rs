@@ -19,6 +19,17 @@ impl Propagativity {
         }
     }
 
+    pub(crate) fn force_propagating(&mut self) {
+        use Propagativity::*;
+        let s = std::mem::take(self);
+        match s {
+            Propagating(id) | Resting(id, ..) => {
+                *self = Propagativity::Propagating(id);
+            }
+            Unknown => {}
+        }
+    }
+
     pub(crate) fn propagate(&mut self) -> Option<IdTree> {
         use Propagativity::*;
         let s = std::mem::take(self);

@@ -14,8 +14,12 @@ fn claim_ids_recurse(own: IdTree, dead_peers: IdTree) -> IdReclaimTree {
         (One, One) => panic!("Logic bug"),
 
         (Zero, SubTree(..)) => IdReclaimTree::Zero,
-        (One, SubTree(..)) => panic!("Logic bug"),
-
+        (One, SubTree(..)) => {
+            // HIT
+            //panic!("Logic bug"),
+            error!("Logic bug");
+            IdReclaimTree::One
+        }
         (SubTree(..), One) => {
             // HIT
             //panic!("Logic bug"),

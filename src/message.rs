@@ -1,16 +1,19 @@
 use crate::reality_token::RealityToken;
 use serde::{Deserialize, Serialize};
 use treeclocks::{EventTree, IdTree};
+use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum PollinationMessage {
     Heartbeat {
+        uuid: Uuid,
         id: IdTree,
         //topic: String,
         timestamp: EventTree,
         reality_token: RealityToken,
     },
     Update {
+        uuid: Uuid,
         id: IdTree,
         //topic: String,
         timestamp: EventTree,
@@ -18,6 +21,7 @@ pub enum PollinationMessage {
         patch: BinaryPatch,
     },
     RealitySkew {
+        uuid: Uuid,
         id: IdTree,
         //topic: String,
         timestamp: EventTree,
@@ -25,16 +29,21 @@ pub enum PollinationMessage {
         patch: BinaryPatch,
         peer_count: usize,
     },
-    NewMember {},
+    NewMember {
+        uuid: Uuid,
+    },
     Seed {
+        uuid: Uuid,
         id: IdTree,
         //topic: String,
         timestamp: EventTree,
         reality_token: RealityToken,
         patch: BinaryPatch,
+        peer_count: usize,
         new_id: IdTree,
     },
     SeeOther {
+        uuid: Uuid,
         id: IdTree,
         //topic: String,
         timestamp: EventTree,
@@ -47,7 +56,7 @@ impl PollinationMessage {
     pub fn timestamp(&self) -> Option<&EventTree> {
         use PollinationMessage::*;
         match self {
-            NewMember {} => None,
+            NewMember { .. } => None,
             Heartbeat { timestamp, .. }
             | Update { timestamp, .. }
             | RealitySkew { timestamp, .. }
@@ -59,7 +68,7 @@ impl PollinationMessage {
     pub fn id(&self) -> Option<&IdTree> {
         use PollinationMessage::*;
         match self {
-            NewMember {} => None,
+            NewMember { .. } => None,
             Heartbeat { id, .. }
             | Update { id, .. }
             | RealitySkew { id, .. }
@@ -78,7 +87,7 @@ impl PollinationMessage {
     fn delete_patch(&mut self) {
         use PollinationMessage::*;
         match self {
-            Heartbeat { .. } | NewMember {} => {}
+            Heartbeat { .. } | NewMember { .. } => {}
             Update { patch, .. }
             | RealitySkew { patch, .. }
             | SeeOther { patch, .. }
@@ -94,23 +103,29 @@ impl std::fmt::Display for PollinationMessage {
         use PollinationMessage::*;
         match self {
             Heartbeat {
+                uuid,
                 id,
                 //topic,
                 timestamp,
                 reality_token,
             } => {
-                write!(f, "HB - {id} - {timestamp} - {reality_token}")
+                write!(f, "HB - {uuid} - {id} - {timestamp} - {reality_token}")
             }
             Update {
+                uuid,
                 id,
                 //topic,
                 timestamp,
                 reality_token,
                 patch,
             } => {
-                write!(f, "UP - {id} - {timestamp} - {reality_token} - {patch}")
+                write!(
+                    f,
+                    "UP - {uuid} - {id} - {timestamp} - {reality_token} - {patch}"
+                )
             }
             RealitySkew {
+                uuid,
                 id,
                 //topic,
                 timestamp,
@@ -120,33 +135,39 @@ impl std::fmt::Display for PollinationMessage {
             } => {
                 write!(
                     f,
-                    "RS - {id} - {timestamp} - {reality_token} - {peer_count} - {patch}"
+                    "RS - {uuid} - {id} - {timestamp} - {reality_token} - {peer_count} - {patch}"
                 )
             }
-            NewMember {} => {
-                write!(f, "NM")
+            NewMember { uuid } => {
+                write!(f, "NM - {uuid}")
             }
             Seed {
+                uuid,
                 id,
                 //topic,
                 timestamp,
                 reality_token,
                 new_id,
+                peer_count,
                 patch,
             } => {
                 write!(
                     f,
-                    "SE - {id} - {timestamp} - {reality_token} - {new_id} - {patch}"
+                    "SE - {uuid} - {id} - {timestamp} - {reality_token} - {peer_count} - {new_id} - {patch}"
                 )
             }
             SeeOther {
+                uuid,
                 id,
                 //topic,
                 timestamp,
                 reality_token,
                 patch,
             } => {
-                write!(f, "SO - {id} - {timestamp} - {reality_token} - {patch}")
+                write!(
+                    f,
+                    "SO - {uuid} - {id} - {timestamp} - {reality_token} - {patch}"
+                )
             }
         }
     }

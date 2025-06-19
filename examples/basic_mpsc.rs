@@ -12,13 +12,13 @@ use tokio::{task::JoinSet, time::interval};
 use tracing::{Instrument, info, instrument};
 use tracing_subscriber::FmtSubscriber;
 
-const N: usize = 5;
+const N: usize = 3;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     FmtSubscriber::builder()
         //.json()
-        .with_env_filter("basic=debug,florescence=info,treeclocks=trace")
+        .with_env_filter("basic=debug,florescence=debug,treeclocks=trace")
         .with_line_number(true)
         .with_ansi(false)
         .init();
@@ -36,12 +36,20 @@ async fn main() -> Result<()> {
         interval.tick().await;
         println!("\n\n========== {:?} =========", start.elapsed());
 
+        let mut rts = vec![];
         for (i, h) in handles.iter_mut().enumerate() {
             if let Some(n) = h.data().await {
+                rts.push(n.reality_token());
                 println!("{i} => {}\n", n.beautiful());
             } else {
-                info!("Node died.");
+                info!("Node died: {i}.");
             }
+        }
+
+        let first = rts[0];
+        if rts.iter().all(|x| *x == first) {
+            println!("\n\nConverged: {:?}", start.elapsed());
+            break;
         }
     }
 

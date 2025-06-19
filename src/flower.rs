@@ -24,6 +24,7 @@ use tokio::{
 #[allow(unused)]
 use tracing::{Instrument, debug, error, info, instrument, trace, warn};
 use treeclocks::{EventTree, IdTree};
+use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
@@ -55,8 +56,6 @@ where
 
     //#[instrument(skip_all, add_field(info = self.own_info()))]
     async fn run(mut self) -> anyhow::Result<()> {
-        self.nucleus.set(self.engine.addr().clone());
-
         let mut seed_list = std::mem::take(&mut self.seed_list);
         for addr in seed_list.drain(..) {
             if addr != *self.engine.addr() {
@@ -143,44 +142,7 @@ where
         debug!("s0 {self}");
         debug!("i {idx}: {message}");
 
-        self.nucleus.check_and_reset_reality_token();
-        let msg = match message {
-            PollinationMessage::Heartbeat {
-                id,
-                timestamp,
-                reality_token,
-            } => self.handle_heartbeat(idx, id, timestamp, reality_token),
-            PollinationMessage::Update {
-                id,
-                timestamp,
-                reality_token,
-                patch,
-            } => self.handle_update(idx, id, timestamp, reality_token, patch),
-            PollinationMessage::RealitySkew {
-                id,
-                timestamp,
-                reality_token,
-                patch,
-                peer_count,
-            } => self.handle_reality_skew(idx, id, timestamp, reality_token, patch, peer_count),
-            PollinationMessage::NewMember {} => self.handle_new_member(),
-            PollinationMessage::Seed {
-                id,
-                timestamp,
-                reality_token,
-                patch,
-                new_id,
-            } => {
-                self.handle_seed(idx, id, timestamp, reality_token, patch, new_id)
-                    .await
-            }
-            PollinationMessage::SeeOther {
-                id,
-                timestamp,
-                reality_token,
-                patch,
-            } => self.handle_see_other(idx, id, timestamp, reality_token, patch),
-        };
+        let msg = self.handle_msg_inner(idx, message);
 
         if let Some(msg) = msg {
             debug!("o {idx}: {msg}");
@@ -193,6 +155,54 @@ where
         }
 
         debug!("s1 {self}");
+    }
+
+    fn handle_msg_inner(
+        &mut self,
+        idx: usize,
+        message: PollinationMessage,
+    ) -> Option<PollinationMessage> {
+        self.nucleus.check_and_reset_reality_token();
+        match message {
+            PollinationMessage::Heartbeat {
+                uuid: _,
+                id,
+                timestamp,
+                reality_token,
+            } => self.handle_heartbeat(idx, id, timestamp, reality_token),
+            PollinationMessage::Update {
+                uuid: _,
+                id,
+                timestamp,
+                reality_token,
+                patch,
+            } => self.handle_update(idx, id, timestamp, reality_token, patch),
+            PollinationMessage::RealitySkew {
+                uuid: _,
+                id,
+                timestamp,
+                reality_token,
+                patch,
+                peer_count,
+            } => self.handle_reality_skew(idx, id, timestamp, reality_token, patch, peer_count),
+            PollinationMessage::NewMember { uuid: _ } => self.handle_new_member(),
+            PollinationMessage::Seed {
+                uuid: _,
+                id,
+                timestamp,
+                reality_token,
+                patch,
+                peer_count,
+                new_id,
+            } => self.handle_seed(idx, id, timestamp, reality_token, patch, peer_count, new_id),
+            PollinationMessage::SeeOther {
+                uuid: _,
+                id,
+                timestamp,
+                reality_token,
+                patch,
+            } => self.handle_see_other(idx, id, timestamp, reality_token, patch),
+        }
     }
 
     #[instrument(name = "HB", skip_all)]
@@ -227,14 +237,45 @@ where
         _peer_id: IdTree,
         peer_ts: EventTree,
         peer_rt: RealityToken,
-        patch: BinaryPatch,
+        peer_patch: BinaryPatch,
     ) -> Option<PollinationMessage> {
         match self.nucleus.timestamp().partial_cmp(&peer_ts) {
             Some(Ordering::Greater) => {
                 let patch = self.nucleus.create_patch(&peer_ts);
                 self.msg_update(patch)
             }
-            cmp @ Some(Ordering::Less) | cmp @ None => match self.nucleus.apply(peer_rt, patch) {
+            cmp @ Some(Ordering::Less) | cmp @ None => {
+                if peer_rt != self.nucleus.reality_token() {
+                    let mut new_nucleus = self.nucleus.clone();
+                    match new_nucleus.apply(peer_patch) {
+                        Ok(()) => {
+                            if new_nucleus.reality_token() != peer_rt {
+                                let patch = self.nucleus.create_patch(&peer_ts);
+                                self.msg_reality_skew(patch)
+                            } else {
+                                error!("Clean Update does not contain Self!");
+                                assert!(new_nucleus.contains_self());
+                                self.nucleus = new_nucleus;
+                                self.msg_heartbeat()
+                            }
+                        }
+                        Err(err) => {
+                            error!("Error applying patch: {err}");
+                            None
+                        }
+                    }
+                } else {
+                    // TODO: Handle error
+                    self.nucleus
+                        .apply(peer_patch)
+                        .expect("Unable to apply patch");
+
+                    self.msg_heartbeat()
+                }
+            }
+
+            /*
+            match self.nucleus.apply_old(peer_rt, patch) {
                 Ok(()) => {
                     if cmp.is_none() {
                         let patch = self.nucleus.create_patch(&peer_ts);
@@ -252,6 +293,7 @@ where
                     None
                 }
             },
+            */
             Some(Ordering::Equal) => {
                 if peer_rt != self.nucleus.reality_token() {
                     let patch = self.nucleus.create_patch(&peer_ts);
@@ -270,11 +312,45 @@ where
         _peer_id: IdTree,
         peer_ts: EventTree,
         peer_rt: RealityToken,
-        patch: BinaryPatch,
+        peer_patch: BinaryPatch,
         peer_count: usize,
     ) -> Option<PollinationMessage> {
+        if peer_rt != self.nucleus.reality_token() {
+            let mut new_nucleus = self.nucleus.clone();
+            match new_nucleus.apply(peer_patch) {
+                Ok(()) => {
+                    if new_nucleus.reality_token() != peer_rt {
+                        if peer_count > self.nucleus.peer_count() {
+                            self.msg_new_member()
+                        } else if peer_count == self.nucleus.peer_count() {
+                            if peer_rt > self.nucleus.reality_token() {
+                                self.msg_new_member()
+                            } else {
+                                let patch = self.nucleus.create_patch(&peer_ts);
+                                self.msg_reality_skew(patch)
+                            }
+                        } else {
+                            let patch = self.nucleus.create_patch(&peer_ts);
+                            self.msg_reality_skew(patch)
+                        }
+                    } else {
+                        assert!(self.nucleus.contains_self());
+                        self.nucleus = new_nucleus;
+                        self.msg_heartbeat()
+                    }
+                }
+                Err(err) => {
+                    error!("Error applying patch: {err}");
+                    None
+                }
+            }
+        } else {
+            debug!("Reality skew detected by peer, but not by self.");
+            self.msg_heartbeat()
+        }
+        /*
         if matches!(
-            self.nucleus.apply(peer_rt, patch),
+            self.nucleus.apply_old(peer_rt, patch),
             Err(NucleusError::RealitySkew)
         ) {
             match self.nucleus.peer_count().cmp(&peer_count) {
@@ -296,6 +372,7 @@ where
             debug!("Reality skew detected by peer, but not by self.");
             self.msg_heartbeat()
         }
+        */
     }
 
     #[instrument(name = "NM", skip_all)]
@@ -308,15 +385,73 @@ where
     }
 
     #[instrument(name = "SE", skip_all)]
-    async fn handle_seed(
+    fn handle_seed(
         &mut self,
         idx: usize,
         peer_id: IdTree,
         peer_ts: EventTree,
         peer_rt: RealityToken,
-        patch: BinaryPatch,
+        peer_patch: BinaryPatch,
+        peer_count: usize,
         new_id: IdTree,
     ) -> Option<PollinationMessage> {
+        if peer_rt != self.nucleus.reality_token() {
+            let mut new_nucleus = self.nucleus.clone();
+            match new_nucleus.apply(peer_patch.clone()) {
+                Ok(()) => {
+                    if new_nucleus.reality_token() != peer_rt {
+                        if peer_count > self.nucleus.peer_count() {
+                            assert!(!new_nucleus.contains_self());
+
+                            // Take the new ID
+                            self.nucleus.reset(new_id, peer_patch);
+                            let patch = self.nucleus.create_patch(&peer_ts);
+                            self.msg_update(patch)
+                        } else if peer_count == self.nucleus.peer_count() {
+                            assert!(!new_nucleus.contains_self());
+
+                            if peer_rt > self.nucleus.reality_token() {
+                                // Take the new ID
+                                self.nucleus.reset(new_id, peer_patch);
+                                let patch = self.nucleus.create_patch(&peer_ts);
+                                self.msg_update(patch)
+                            } else {
+                                let patch = self.nucleus.create_patch(&peer_ts);
+                                self.msg_reality_skew(patch)
+                            }
+                        } else {
+                            let patch = self.nucleus.create_patch(&peer_ts);
+                            self.msg_reality_skew(patch)
+                        }
+                    } else {
+                        if new_nucleus.contains_self() {
+                            self.nucleus = new_nucleus;
+                            debug!("Mark dead; Added");
+                            self.nucleus.mark_dead(new_id);
+                            let patch = self.nucleus.create_patch(&peer_ts);
+                            self.msg_update(patch)
+                        } else {
+                            // Take the new ID
+                            self.nucleus.reset(new_id, peer_patch);
+                            let patch = self.nucleus.create_patch(&peer_ts);
+                            self.msg_update(patch)
+                        }
+                    }
+                }
+                Err(err) => {
+                    error!("Error applying patch: {err}");
+                    None
+                }
+            }
+        } else {
+            assert!(self.nucleus.contains_self());
+            debug!("Mark dead; the same reality_token");
+            self.nucleus.mark_dead(new_id);
+            let patch = self.nucleus.create_patch(&peer_ts);
+            self.msg_update(patch)
+        }
+        /*
+        // TODO: Need to fix
         if self.nucleus.reality_token() == peer_rt {
             self.nucleus.mark_dead(new_id);
             let patch = self.nucleus.create_patch(&peer_ts);
@@ -344,6 +479,7 @@ where
             let patch = self.nucleus.create_patch(&peer_ts);
             self.msg_update(patch)
         }
+        */
     }
 
     #[instrument(name = "SO", skip_all)]
@@ -370,6 +506,7 @@ where
     fn msg_heartbeat(&self) -> Option<PollinationMessage> {
         let id = self.nucleus.id()?.clone();
         Some(PollinationMessage::Heartbeat {
+            uuid: self.nucleus.uuid(),
             id,
             timestamp: self.nucleus.timestamp().to_owned(),
             reality_token: self.nucleus.reality_token(),
@@ -379,6 +516,7 @@ where
     fn msg_update(&self, patch: BinaryPatch) -> Option<PollinationMessage> {
         let id = self.nucleus.id()?.clone();
         Some(PollinationMessage::Update {
+            uuid: self.nucleus.uuid(),
             id,
             timestamp: self.nucleus.timestamp().to_owned(),
             reality_token: self.nucleus.reality_token(),
@@ -389,6 +527,7 @@ where
     fn msg_reality_skew(&self, patch: BinaryPatch) -> Option<PollinationMessage> {
         let id = self.nucleus.id()?.clone();
         Some(PollinationMessage::RealitySkew {
+            uuid: self.nucleus.uuid(),
             id,
             timestamp: self.nucleus.timestamp().to_owned(),
             reality_token: self.nucleus.reality_token(),
@@ -399,17 +538,21 @@ where
 
     // Option is unecessary but maintains symmetry
     fn msg_new_member(&self) -> Option<PollinationMessage> {
-        Some(PollinationMessage::NewMember {})
+        Some(PollinationMessage::NewMember {
+            uuid: self.nucleus.uuid(),
+        })
     }
 
     fn msg_seed(&self, new_id: IdTree) -> Option<PollinationMessage> {
         let id = self.nucleus.id()?.clone();
         let patch = self.nucleus.create_patch(&EventTree::Leaf(0));
         Some(PollinationMessage::Seed {
+            uuid: self.nucleus.uuid(),
             id,
             timestamp: self.nucleus.timestamp().to_owned(),
             reality_token: self.nucleus.reality_token(),
             patch,
+            peer_count: self.nucleus.peer_count(),
             new_id,
         })
     }
@@ -418,6 +561,7 @@ where
         let id = self.nucleus.id()?.clone();
         let patch = self.nucleus.create_patch(&EventTree::Leaf(0));
         Some(PollinationMessage::SeeOther {
+            uuid: self.nucleus.uuid(),
             id,
             timestamp: self.nucleus.timestamp().to_owned(),
             reality_token: self.nucleus.reality_token(),
@@ -518,7 +662,7 @@ where
 
         let (w0, w1) = WalkieTalkie::pair();
         let flower = Flower {
-            nucleus: Nucleus::new(),
+            nucleus: Nucleus::new(Uuid::new_v4(), engine.addr().clone()),
             engine,
             seed_list: self.seed_list,
             conns: StableVec::new(),
@@ -537,6 +681,101 @@ impl<E: Engine<PollinationMessage>> Default for FlowerBuilder<E> {
         FlowerBuilder {
             engine: None,
             seed_list: vec![],
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc::{Receiver, Sender, channel};
+
+    #[test]
+    fn test_seed_1() {
+        let mut f0 = flower_marionette(Uuid::from_u128(1));
+        f0.nucleus.set(0);
+        assert!(f0.nucleus.contains_self());
+
+        let mut f1 = flower_marionette(Uuid::from_u128(2));
+        f1.nucleus.set(1);
+        assert!(f1.nucleus.contains_self());
+
+        let msg = f0.msg_heartbeat().unwrap();
+        println!("f0 -> {msg}");
+        let msg = f1.handle_msg_inner(0, msg).unwrap();
+        println!("f1 -> {msg}");
+        let msg = f0.handle_msg_inner(0, msg).unwrap();
+        println!("f0 -> {msg}");
+        let msg = f1.handle_msg_inner(0, msg).unwrap();
+        println!("f1 -> {msg}");
+        let msg = f0.handle_msg_inner(0, msg).unwrap();
+        println!("f0 -> {msg}");
+        let msg = f1.handle_msg_inner(0, msg).unwrap();
+        println!("f1 -> {msg}");
+
+        // Gets rid of
+        f0.nucleus.force_propagating();
+        f1.nucleus.force_propagating();
+        insta::assert_debug_snapshot!((f0.nucleus, f1.nucleus));
+    }
+
+    #[test]
+    fn test_seed_2() {
+        let mut f0 = flower_marionette(Uuid::from_u128(1));
+        f0.nucleus.set(0);
+        assert!(f0.nucleus.contains_self());
+
+        let mut f1 = flower_marionette(Uuid::from_u128(2));
+        f1.nucleus.set(1);
+        assert!(f1.nucleus.contains_self());
+
+        let msg = f0.msg_heartbeat().unwrap();
+        println!("{msg}");
+        let msg = f1.handle_msg_inner(0, msg).unwrap();
+        println!("{msg}");
+        let msg = f0.handle_msg_inner(0, msg).unwrap();
+        println!("{msg}");
+        let msg = f1.handle_msg_inner(0, msg).unwrap();
+        println!("{msg}");
+        let msg = f0.handle_msg_inner(0, msg).unwrap();
+        println!("{msg}");
+        let msg = f1.handle_msg_inner(0, msg).unwrap();
+        println!("{msg}");
+        f0.nucleus.force_propagating();
+        f1.nucleus.force_propagating();
+        insta::assert_debug_snapshot!((f0.nucleus, f1.nucleus));
+    }
+
+    fn flower_marionette(uuid: Uuid) -> Flower<FakeEngine> {
+        let (w0, _) = WalkieTalkie::pair();
+        Flower {
+            nucleus: Nucleus::new(uuid, 0),
+            engine: FakeEngine {},
+            seed_list: vec![],
+            conns: StableVec::new(),
+            receivers: JoinSet::new(),
+            handle_comm: w0,
+        }
+    }
+
+    struct FakeEngine {}
+    impl<T> Engine<T> for FakeEngine
+    where
+        T: Serialize + for<'a> Deserialize<'a> + Clone + Send,
+    {
+        type Addr = usize;
+        async fn start(&mut self) {}
+
+        fn addr(&self) -> &Self::Addr {
+            &0
+        }
+
+        async fn create_conn(&mut self, addr: usize) -> (Sender<T>, Receiver<T>) {
+            unimplemented!()
+        }
+
+        async fn get_new_conn(&mut self) -> Option<(Sender<T>, Receiver<T>)> {
+            unimplemented!()
         }
     }
 }

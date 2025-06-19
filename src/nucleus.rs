@@ -13,24 +13,34 @@ mod recycling;
 
 #[derive(Clone, Debug)]
 pub struct Nucleus<A> {
+    uuid: Uuid,
     propagativity: Propagativity,
     reality_token: RealityToken,
     core_map: ItcMap<PeerInfo<A>>,
-    uuid: Uuid,
+    own_info: PeerInfo<A>,
 }
 
 impl<A> Nucleus<A>
 where
     A: Clone + for<'a> Deserialize<'a> + Serialize,
 {
-    pub(crate) fn new() -> Self {
-        Default::default()
+    pub(crate) fn new(uuid: Uuid, own_addr: A) -> Self {
+        let reality_token = RealityToken::default();
+        let own = PeerInfo::new(uuid, own_addr);
+        let mut s = Self {
+            propagativity: Propagativity::Propagating(IdTree::One),
+            reality_token,
+            core_map: ItcMap::new(),
+            uuid,
+            own_info: own.clone(),
+        };
+        assert!(!s.set_self());
+        s
     }
 
     #[allow(unused)]
-    pub(crate) fn own_info(&self) -> Option<&PeerInfo<A>> {
-        let id = self.propagativity.id()?;
-        self.core_map.get(id)
+    pub(crate) fn own_info(&self) -> &PeerInfo<A> {
+        &self.own_info
     }
 
     pub(crate) fn reset(&mut self, id: IdTree, patch: BinaryPatch) {
@@ -42,38 +52,22 @@ where
         let _ = core_map.apply(patch);
         self.core_map = core_map;
         self.reality_token = self.recalculate_reality_token();
+        self.set_self();
         debug!("RESET");
     }
 
-    /*
-    fn from_parts(
-        id: IdTree,
-        mut reality_token: RealityToken,
-        patch: BinaryPatch,
-    ) -> Self {
-        // TODO: Handle error
-        let patch: Patch<PeerInfo<A>> = patch.decode().expect("Error deserializing patch");
-        let propagativity = Propagativity::Resting(id.clone(), Instant::now());
-
-        let mut core_map = ItcMap::new();
-        let _ = core_map.apply(patch);
-
-        let uuid = Uuid::new_v4();
-        reality_token.push(uuid);
-
-        Self {
-            propagativity,
-            reality_token,
-            core_map,
-            uuid,
-        }
+    pub(crate) fn uuid(&self) -> Uuid {
+        self.uuid
     }
-    */
 
     pub(crate) fn set(&mut self, addr: A) -> bool {
+        self.own_info = PeerInfo::new(self.uuid, addr);
+        self.set_self()
+    }
+
+    fn set_self(&mut self) -> bool {
         if let Some(id) = self.propagativity.id() {
-            let own_info = PeerInfo::new(self.uuid, addr);
-            self.insert(id.clone(), own_info)
+            self.insert(id.clone(), self.own_info.clone())
         } else {
             false
         }
@@ -103,7 +97,11 @@ where
         }
     }
 
-    pub(crate) fn reality_token(&self) -> RealityToken {
+    pub(crate) fn force_propagating(&mut self) {
+        self.propagativity.force_propagating()
+    }
+
+    pub fn reality_token(&self) -> RealityToken {
         self.reality_token
     }
 
@@ -147,7 +145,7 @@ where
 
         if &new_id != self.id()? {
             debug!("CHECK =>> Reclaimed Id: {new_id}");
-            let own_addr = self.own_info()?.clone().addr?;
+            let own_addr = self.own_info().clone().addr?;
             self.propagativity = Propagativity::Resting(new_id, Instant::now());
             self.set(own_addr);
             Some(())
@@ -186,52 +184,80 @@ where
         BinaryPatch::new(itc_patch).expect("Error serializing patch")
     }
 
-    pub(crate) fn apply(
-        &mut self,
-        peer_rt: RealityToken,
-        patch: BinaryPatch,
-    ) -> Result<(), NucleusError> {
-        let patch: Patch<PeerInfo<A>> = patch.decode()?;
-        let mut new_rt = self.reality_token;
-        let mut new_core = if peer_rt != self.reality_token {
-            self.core_map.clone()
-        } else {
-            std::mem::take(&mut self.core_map)
-        };
-
-        let (mut additions, mut removals) = new_core.apply(patch);
-        for (_, info) in removals.drain(..) {
-            if info.uuid == self.uuid {
-                debug!("CHECK =>> Self-UUID removal; RealitySkew");
-                return Err(NucleusError::RealitySkew);
+    pub(crate) fn contains_self(&self) -> bool {
+        if let Some(id) = self.id() {
+            if let Some(info) = self.core_map.get(id) {
+                info.uuid == self.uuid
+            } else {
+                false
             }
-            debug!("CHECK =>> REMOVE UUID: {}", info.uuid);
-            new_rt.push(info.uuid);
-            debug!("CHECK =>> new_rt: {new_rt}");
-        }
-        for (_, info) in additions.drain(..) {
-            debug!("CHECK =>> ADD UUID: {}", info.uuid);
-            new_rt.push(info.uuid);
-            debug!("CHECK =>> new_rt: {new_rt}");
-        }
-
-        if new_rt != peer_rt {
-            debug!("CHECK =>> rt !=");
-            /*
-            if peer_rt == self.reality_token {
-                panic!("Corrupted update.");
-            }
-            */
-
-            Err(NucleusError::RealitySkew)
         } else {
-            debug!("CHECK =>> OK");
-            self.reality_token = new_rt;
-            self.core_map = new_core;
-            self.check_and_reset_reality_token();
-            Ok(())
+            false
         }
     }
+
+    pub(crate) fn apply(&mut self, patch: BinaryPatch) -> Result<(), NucleusError> {
+        let patch: Patch<PeerInfo<A>> = patch.decode()?;
+        let (mut additions, mut removals) = self.core_map.apply(patch);
+
+        for (_, info) in removals.drain(..) {
+            self.reality_token.push(info.uuid);
+        }
+        for (_, info) in additions.drain(..) {
+            self.reality_token.push(info.uuid);
+        }
+
+        Ok(())
+    }
+
+    /*
+        pub(crate) fn apply_old(
+            &mut self,
+            peer_rt: RealityToken,
+            patch: BinaryPatch,
+        ) -> Result<(), NucleusError> {
+            let patch: Patch<PeerInfo<A>> = patch.decode()?;
+            let mut new_rt = self.reality_token;
+            let mut new_core = if peer_rt != self.reality_token {
+                self.core_map.clone()
+            } else {
+                std::mem::take(&mut self.core_map)
+            };
+
+            let (mut additions, mut removals) = new_core.apply(patch);
+            for (_, info) in removals.drain(..) {
+                if info.uuid == self.uuid {
+                    debug!("CHECK =>> Self-UUID removal; RealitySkew");
+                    return Err(NucleusError::RealitySkew);
+                }
+                debug!("CHECK =>> REMOVE UUID: {}", info.uuid);
+                new_rt.push(info.uuid);
+                debug!("CHECK =>> new_rt: {new_rt}");
+            }
+            for (_, info) in additions.drain(..) {
+                debug!("CHECK =>> ADD UUID: {}", info.uuid);
+                new_rt.push(info.uuid);
+                debug!("CHECK =>> new_rt: {new_rt}");
+            }
+
+            if new_rt != peer_rt {
+                debug!("CHECK =>> rt !=");
+                /*
+                if peer_rt == self.reality_token {
+                    panic!("Corrupted update.");
+                }
+                */
+
+                Err(NucleusError::RealitySkew)
+            } else {
+                debug!("CHECK =>> OK");
+                self.reality_token = new_rt;
+                self.core_map = new_core;
+                self.check_and_reset_reality_token();
+                Ok(())
+            }
+        }
+    */
 }
 
 impl<A: fmt::Display> Nucleus<A> {
@@ -253,19 +279,6 @@ impl<A: fmt::Display> Nucleus<A> {
     }
 }
 
-impl<A> Default for Nucleus<A> {
-    fn default() -> Self {
-        let uuid = Uuid::new_v4();
-        let reality_token = RealityToken::default();
-        Self {
-            propagativity: Propagativity::Propagating(IdTree::One),
-            reality_token,
-            core_map: ItcMap::new(),
-            uuid,
-        }
-    }
-}
-
 impl<A> fmt::Display for Nucleus<A>
 where
     A: fmt::Display,
@@ -273,17 +286,14 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
-            "id:{} - rt:{} - uuid:{} - map:{}",
-            self.propagativity, self.reality_token, self.uuid, self.core_map
+            "id:{} - rt:{} - uuid:{} - own:{} - map:{}",
+            self.propagativity, self.reality_token, self.uuid, self.own_info, self.core_map
         )
     }
 }
 
 #[derive(Debug, Error)]
 pub(crate) enum NucleusError {
-    #[error("RealitySkew")]
-    RealitySkew,
-
     #[error("Deserialization error: {0}")]
     DeserializationError(#[from] bincode::error::DecodeError),
 
@@ -298,8 +308,7 @@ mod tests {
     #[test]
     fn test_nucleus() {
         let n0_uuid = Uuid::new_v4();
-        let mut n0 = Nucleus::new();
-        n0.set(10);
+        let mut n0 = Nucleus::new(n0_uuid, 0);
         assert_eq!(n0.timestamp().to_string(), "1".to_string());
 
         let peer_id = n0.propagate().unwrap();
@@ -310,8 +319,8 @@ mod tests {
         assert_eq!(n0.timestamp().to_string(), "(1, 2, 0)".to_string());
 
         let n1_uuid = Uuid::new_v4();
-        let mut n1 = Nucleus::<usize>::from_parts(peer_id, n0.reality_token(), patch);
-        n1.set(0);
+        let mut n1 = Nucleus::new(n1_uuid, 0);
+        n1.reset(peer_id, patch);
         n1.set(1);
 
         assert_eq!(n1.timestamp().to_string(), "(2, 0, 1)".to_string());
