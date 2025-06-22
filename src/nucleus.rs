@@ -48,7 +48,45 @@ where
         BinaryPatch::new(itc_patch).expect("Error serializing patch")
     }
 
-    fn apply_patch(&mut self, patch: BinaryPatch) -> Result<(), PatchApplyError> {
+    fn apply_patch(
+        &mut self,
+        peer_rt: RealityToken,
+        patch: BinaryPatch,
+    ) -> Result<(), PatchApplyError<A>> {
+        if peer_rt != self.reality_token {
+            // Apply patch on a clone to detect RealitySkew
+            let mut self_clone = self.clone();
+            match self_clone.apply_patch_unchecked(patch) {
+                Ok(()) => {
+                    if self_clone.reality_token == peer_rt {
+                        *self = self_clone;
+                        Ok(())
+                    } else {
+                        Err(PatchApplyError::RealitySkew(self_clone))
+                    }
+                }
+                Err(PatchApplyError::SelfRemoved) => Err(PatchApplyError::RealitySkew(self_clone)),
+                err => err,
+            }
+        } else {
+            match self.apply_patch_unchecked(patch) {
+                Ok(()) => {
+                    if self.reality_token != peer_rt {
+                        panic!("Reality token mismatch after a clean update");
+                    } else {
+                        Ok(())
+                    }
+                }
+                Err(PatchApplyError::SelfRemoved) => {
+                    panic!("Self removal during a peer_rt match update")
+                }
+                Err(PatchApplyError::DeserializationError(err)) => Err(err.into()),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    fn apply_patch_unchecked(&mut self, patch: BinaryPatch) -> Result<(), PatchApplyError<A>> {
         let patch: Patch<PeerInfo<A>> = patch.decode()?;
         let (mut additions, mut removals) = self.core_map.apply(patch);
 
@@ -111,7 +149,8 @@ where
             timestamp: peer_ts,
             reality_token: peer_rt,
             ..
-        } = message else {
+        } = message
+        else {
             unreachable!()
         };
 
@@ -141,7 +180,8 @@ where
             reality_token: peer_rt,
             patch,
             ..
-        } = message else {
+        } = message
+        else {
             unreachable!()
         };
 
@@ -151,42 +191,14 @@ where
                 Ok(self.msg_update(patch))
             }
 
-            Some(Ordering::Less) | None => {
-                if peer_rt != self.reality_token {
-                    // Apply patch on a clone to detect RealitySkew
-                    let mut self_clone = self.clone();
-                    match self_clone.apply_patch(patch) {
-                        Ok(()) => {
-                            if self_clone.reality_token == peer_rt {
-                                *self = self_clone;
-                                Ok(self.msg_heartbeat())
-                            } else {
-                                let patch = self.create_patch(&peer_ts);
-                                Ok(self.msg_reality_skew(patch))
-                            }
-                        }
-                        Err(PatchApplyError::SelfRemoved) => {
-                            let patch = self.create_patch(&peer_ts);
-                            Ok(self.msg_reality_skew(patch))
-                        }
-                        Err(PatchApplyError::DeserializationError(err)) => Err(err.into()),
-                    }
-                } else {
-                    match self.apply_patch(patch) {
-                        Ok(()) => {
-                            if self.reality_token != peer_rt {
-                                panic!("Reality token mismatch after a clean update");
-                            } else {
-                                Ok(self.msg_heartbeat())
-                            }
-                        }
-                        Err(PatchApplyError::SelfRemoved) => {
-                            panic!("Self removal during a peer_rt match update")
-                        }
-                        Err(PatchApplyError::DeserializationError(err)) => Err(err.into()),
-                    }
+            Some(Ordering::Less) | None => match self.apply_patch(peer_rt, patch) {
+                Ok(()) => Ok(self.msg_heartbeat()),
+                Err(PatchApplyError::RealitySkew(_)) => {
+                    let patch = self.create_patch(&peer_ts);
+                    Ok(self.msg_reality_skew(patch))
                 }
-            }
+                Err(err) => Err(err.into()),
+            },
 
             Some(Ordering::Equal) => {
                 if peer_rt != self.reality_token {
@@ -203,9 +215,7 @@ where
         &mut self,
         message: PollinationMessage,
     ) -> Result<HandleMessageRes<A>, NucleusError> {
-        let PollinationMessage::RealitySkew {
-            ..
-        } = message else {
+        let PollinationMessage::RealitySkew { .. } = message else {
             unreachable!()
         };
 
@@ -310,10 +320,26 @@ impl<A> From<Option<PollinationMessage>> for HandleMessageRes<A> {
 enum NucleusError {
     #[error("Deserialization error: {0}")]
     DeserializationError(#[from] bincode::error::DecodeError),
+
+    #[error("Patch application error")]
+    PatchApplyError,
+}
+
+impl<A> From<PatchApplyError<A>> for NucleusError {
+    fn from(value: PatchApplyError<A>) -> NucleusError {
+        match value {
+            PatchApplyError::RealitySkew(_) => unreachable!(),
+            PatchApplyError::SelfRemoved => NucleusError::PatchApplyError,
+            PatchApplyError::DeserializationError(err) => NucleusError::DeserializationError(err),
+        }
+    }
 }
 
 #[derive(Error, Debug)]
-enum PatchApplyError {
+enum PatchApplyError<A> {
+    #[error("Reality skew")]
+    RealitySkew(Nucleus<A>),
+
     #[error("Update patch removed own ID")]
     SelfRemoved,
 
