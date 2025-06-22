@@ -5,6 +5,7 @@ mod constants;
 mod ds;
 mod handle;
 mod nucleus;
+mod nucleus_old;
 mod peer_info;
 mod propagativity;
 

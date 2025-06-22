@@ -18,7 +18,7 @@ const N: usize = 3;
 async fn main() -> Result<()> {
     FmtSubscriber::builder()
         //.json()
-        .with_env_filter("basic=debug,florescence=debug,treeclocks=trace")
+        .with_env_filter("florescence=debug,treeclocks=trace")
         .with_line_number(true)
         .with_ansi(false)
         .init();
