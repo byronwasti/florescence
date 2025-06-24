@@ -40,15 +40,7 @@ pub enum PollinationMessage {
         reality_token: RealityToken,
         patch: BinaryPatch,
         peer_count: usize,
-        new_id: IdTree,
-    },
-    SeeOther {
-        uuid: Uuid,
-        id: IdTree,
-        //topic: String,
-        timestamp: EventTree,
-        reality_token: RealityToken,
-        patch: BinaryPatch,
+        new_id: Option<IdTree>,
     },
 }
 
@@ -60,7 +52,6 @@ impl PollinationMessage {
             Heartbeat { timestamp, .. }
             | Update { timestamp, .. }
             | RealitySkew { timestamp, .. }
-            | SeeOther { timestamp, .. }
             | Seed { timestamp, .. } => Some(timestamp),
         }
     }
@@ -69,11 +60,9 @@ impl PollinationMessage {
         use PollinationMessage::*;
         match self {
             NewMember { .. } => None,
-            Heartbeat { id, .. }
-            | Update { id, .. }
-            | RealitySkew { id, .. }
-            | SeeOther { id, .. }
-            | Seed { id, .. } => Some(id),
+            Heartbeat { id, .. } | Update { id, .. } | RealitySkew { id, .. } | Seed { id, .. } => {
+                Some(id)
+            }
         }
     }
 
@@ -88,10 +77,7 @@ impl PollinationMessage {
         use PollinationMessage::*;
         match self {
             Heartbeat { .. } | NewMember { .. } => {}
-            Update { patch, .. }
-            | RealitySkew { patch, .. }
-            | SeeOther { patch, .. }
-            | Seed { patch, .. } => {
+            Update { patch, .. } | RealitySkew { patch, .. } | Seed { patch, .. } => {
                 let _ = std::mem::take(patch);
             }
         }
@@ -105,7 +91,6 @@ impl std::fmt::Display for PollinationMessage {
             Heartbeat {
                 uuid,
                 id,
-                //topic,
                 timestamp,
                 reality_token,
             } => {
@@ -114,7 +99,6 @@ impl std::fmt::Display for PollinationMessage {
             Update {
                 uuid,
                 id,
-                //topic,
                 timestamp,
                 reality_token,
                 patch,
@@ -127,7 +111,6 @@ impl std::fmt::Display for PollinationMessage {
             RealitySkew {
                 uuid,
                 id,
-                //topic,
                 timestamp,
                 reality_token,
                 peer_count,
@@ -144,7 +127,6 @@ impl std::fmt::Display for PollinationMessage {
             Seed {
                 uuid,
                 id,
-                //topic,
                 timestamp,
                 reality_token,
                 new_id,
@@ -153,20 +135,7 @@ impl std::fmt::Display for PollinationMessage {
             } => {
                 write!(
                     f,
-                    "SE - {uuid} - {id} - {timestamp} - {reality_token} - {peer_count} - {new_id} - {patch}"
-                )
-            }
-            SeeOther {
-                uuid,
-                id,
-                //topic,
-                timestamp,
-                reality_token,
-                patch,
-            } => {
-                write!(
-                    f,
-                    "SO - {uuid} - {id} - {timestamp} - {reality_token} - {patch}"
+                    "SE - {uuid} - {id} - {timestamp} - {reality_token} - {peer_count} - {new_id:?} - {patch}"
                 )
             }
         }

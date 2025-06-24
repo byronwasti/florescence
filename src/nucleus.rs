@@ -16,22 +16,24 @@ pub struct Nucleus<A> {
     propagativity: Propagativity,
     reality_token: RealityToken,
     core_map: ItcMap<PeerInfo<A>>,
+    own_info: PeerInfo<A>,
 }
 
 impl<A> Nucleus<A>
 where
     A: Clone + for<'a> Deserialize<'a> + Serialize,
 {
-    pub(crate) fn new(uuid: Uuid, own_addr: A) -> Self {
-        let own_info = PeerInfo::new(uuid, own_addr);
+    pub(crate) fn new(uuid: Uuid, own_data: A) -> Self {
+        let own_info = PeerInfo::new(uuid, own_data);
         let reality_token = RealityToken::new(uuid);
         let mut core_map = ItcMap::new();
-        core_map.insert(IdTree::One, own_info);
+        core_map.insert(IdTree::One, own_info.clone());
         Self {
             propagativity: Propagativity::Resting(IdTree::One, Instant::now()),
             reality_token,
             core_map,
             uuid,
+            own_info,
         }
     }
 
@@ -43,11 +45,25 @@ where
         self.propagativity.id()
     }
 
+    pub(crate) fn peer_count(&self) -> usize {
+        self.core_map.len()
+    }
+
+    fn set_raw(&mut self, own_info: PeerInfo<A>) -> Option<()> {
+        let mut removals = self.core_map.insert(self.id()?.clone(), own_info);
+        for (removed_id, info) in removals.drain(..) {
+            self.reality_token.push(info.uuid);
+        }
+        self.reality_token.push(self.uuid);
+        Some(())
+    }
+
     fn create_patch(&self, peer_ts: &EventTree) -> BinaryPatch {
         let itc_patch: Patch<PeerInfo<A>> = self.core_map.diff(peer_ts);
         BinaryPatch::new(itc_patch).expect("Error serializing patch")
     }
 
+    /// NOTE: Doesn't return PatchApplyError::SelfRemoved
     fn apply_patch(
         &mut self,
         peer_rt: RealityToken,
@@ -112,9 +128,24 @@ where
         }
     }
 
+    /// NOTE: Not a clean swap; the new core has most information
+    /// wiped. This is a helper function to efficiently reset.
+    fn swap_cores(&mut self, mut other: Nucleus<A>) -> Nucleus<A> {
+        std::mem::swap(self, &mut other);
+        self.propagativity = Propagativity::Unknown;
+        self.core_map = ItcMap::new();
+        self.reality_token = RealityToken::new(self.uuid);
+        other
+    }
+
+    fn propagate(&mut self) -> Option<IdTree> {
+        let new_id = self.propagativity.propagate()?;
+        self.set_raw(self.own_info.clone())?;
+        Some(new_id)
+    }
+
     /* Message Handling */
 
-    //pub(crate) fn handle_message(&mut self, message: PollinationMessage) -> Result<(Option<PollinationMessage>, Option<Self>), NucleusError> {
     pub(crate) fn handle_message(
         &mut self,
         message: PollinationMessage,
@@ -125,22 +156,11 @@ where
 
             Update { .. } => Ok(self.handle_update(message)?.into()),
 
-            RealitySkew { .. } => {
-                todo!()
-            }
+            RealitySkew { .. } => self.handle_reality_skew(message),
 
-            NewMember { .. } => {
-                todo!()
-            }
+            NewMember { .. } => Ok(self.handle_new_member(message).into()),
 
-            Seed { .. } => {
-                todo!()
-            }
-
-            // TODO: Get rid of SeeOther
-            SeeOther { .. } => {
-                todo!()
-            }
+            Seed { .. } => Ok(self.handle_seed(message).into()),
         }
     }
 
@@ -178,7 +198,7 @@ where
         let PollinationMessage::Update {
             timestamp: peer_ts,
             reality_token: peer_rt,
-            patch,
+            patch: peer_patch,
             ..
         } = message
         else {
@@ -191,7 +211,7 @@ where
                 Ok(self.msg_update(patch))
             }
 
-            Some(Ordering::Less) | None => match self.apply_patch(peer_rt, patch) {
+            Some(Ordering::Less) | None => match self.apply_patch(peer_rt, peer_patch) {
                 Ok(()) => Ok(self.msg_heartbeat()),
                 Err(PatchApplyError::RealitySkew(_)) => {
                     let patch = self.create_patch(&peer_ts);
@@ -215,11 +235,70 @@ where
         &mut self,
         message: PollinationMessage,
     ) -> Result<HandleMessageRes<A>, NucleusError> {
-        let PollinationMessage::RealitySkew { .. } = message else {
+        let PollinationMessage::RealitySkew {
+            timestamp: peer_ts,
+            reality_token: peer_rt,
+            peer_count,
+            patch: peer_patch,
+            ..
+        } = message
+        else {
             unreachable!()
         };
 
-        todo!()
+        match self.apply_patch(peer_rt, peer_patch) {
+            Ok(()) => Ok(HandleMessageRes::response(self.msg_heartbeat())),
+            Err(PatchApplyError::RealitySkew(mut core)) => {
+                if peer_count > self.peer_count()
+                    || peer_count == self.peer_count() && peer_rt > self.reality_token
+                {
+                    let old_core = self.swap_cores(core);
+                    Ok(HandleMessageRes::core_dump(self.msg_new_member(), old_core))
+                } else {
+                    let patch = self.create_patch(&peer_ts);
+                    Ok(HandleMessageRes::response(self.msg_reality_skew(patch)))
+                }
+            }
+            Err(PatchApplyError::SelfRemoved) => unreachable!(),
+            Err(PatchApplyError::DeserializationError(err)) => {
+                Err(NucleusError::DeserializationError(err))
+            }
+        }
+    }
+
+    fn handle_new_member(&mut self, _message: PollinationMessage) -> Option<PollinationMessage> {
+        let new_id = self.propagate();
+        self.msg_seed(new_id)
+    }
+
+    fn handle_seed(&mut self, message: PollinationMessage) -> Option<PollinationMessage> {
+        let PollinationMessage::Seed {
+            timestamp: peer_ts,
+            reality_token: peer_rt,
+            patch: peer_patch,
+            new_id,
+            ..
+        } = message
+        else {
+            unreachable!()
+        };
+
+        // Only reset ourselves if we have no ID
+        if let Some(id) = self.propagativity.id() {
+            return self.msg_heartbeat();
+        }
+
+        if let Some(id) = new_id {
+            let _ = self.apply_patch_unchecked(peer_patch);
+            self.propagativity = Propagativity::Resting(id, Instant::now());
+            self.set_raw(self.own_info.clone());
+            let patch = self.create_patch(&peer_ts);
+            self.msg_update(patch)
+        } else {
+            let _ = self.apply_patch_unchecked(peer_patch);
+            self.reality_token = peer_rt;
+            None
+        }
     }
 
     fn msg_heartbeat(&self) -> Option<PollinationMessage> {
@@ -259,7 +338,7 @@ where
         Some(PollinationMessage::NewMember { uuid: self.uuid })
     }
 
-    fn msg_seed(&self, new_id: IdTree) -> Option<PollinationMessage> {
+    fn msg_seed(&self, new_id: Option<IdTree>) -> Option<PollinationMessage> {
         let id = self.id()?.clone();
         let patch = self.create_patch(&EventTree::Leaf(0));
         Some(PollinationMessage::Seed {
@@ -272,18 +351,6 @@ where
             new_id,
         })
     }
-
-    fn msg_see_other(&self) -> Option<PollinationMessage> {
-        let id = self.id()?.clone();
-        let patch = self.create_patch(&EventTree::Leaf(0));
-        Some(PollinationMessage::SeeOther {
-            uuid: self.uuid,
-            id,
-            timestamp: self.timestamp().to_owned(),
-            reality_token: self.reality_token,
-            patch,
-        })
-    }
 }
 
 pub struct HandleMessageRes<A> {
@@ -292,16 +359,16 @@ pub struct HandleMessageRes<A> {
 }
 
 impl<A> HandleMessageRes<A> {
-    fn response(response: PollinationMessage) -> Self {
+    fn response(response: Option<PollinationMessage>) -> Self {
         Self {
-            response: Some(response),
+            response,
             old_core: None,
         }
     }
 
-    fn core_dump(response: PollinationMessage, core: Nucleus<A>) -> Self {
+    fn core_dump(response: Option<PollinationMessage>, core: Nucleus<A>) -> Self {
         Self {
-            response: Some(response),
+            response,
             old_core: Some(core),
         }
     }

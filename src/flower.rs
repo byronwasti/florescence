@@ -195,13 +195,6 @@ where
                 peer_count,
                 new_id,
             } => self.handle_seed(idx, id, timestamp, reality_token, patch, peer_count, new_id),
-            PollinationMessage::SeeOther {
-                uuid: _,
-                id,
-                timestamp,
-                reality_token,
-                patch,
-            } => self.handle_see_other(idx, id, timestamp, reality_token, patch),
         }
     }
 
@@ -393,7 +386,7 @@ where
         peer_rt: RealityToken,
         peer_patch: BinaryPatch,
         peer_count: usize,
-        new_id: IdTree,
+        new_id: Option<IdTree>,
     ) -> Option<PollinationMessage> {
         if peer_rt != self.nucleus.reality_token() {
             let mut new_nucleus = self.nucleus.clone();
