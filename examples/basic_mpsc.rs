@@ -1,7 +1,7 @@
 use anyhow::Result;
 use florescence::{
     Flower, FlowerHandle,
-    engine::{Engine, mpsc::MpscEngine},
+    engine_old::{Engine, mpsc::MpscEngine},
     message::PollinationMessage,
 };
 use std::{

@@ -10,6 +10,8 @@ use thiserror::Error;
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 use uuid::Uuid;
 
+mod recycling;
+
 #[derive(Clone, Debug)]
 pub struct Nucleus<A> {
     uuid: Uuid,
@@ -49,16 +51,52 @@ where
         self.core_map.len()
     }
 
+    pub(crate) fn bump(&mut self) {
+        // TODO: Optimized version
+        self.set_raw(self.own_info.clone());
+    }
+
+    pub(crate) fn reap_souls(&mut self) -> bool {
+        self.reap_souls_inner().is_some()
+    }
+
+    fn reap_souls_inner(&mut self) -> Option<()> {
+        let dead_peers: IdTree = self
+            .core_map
+            .iter()
+            .filter_map(|(peer_id, peer_info)| {
+                // TODO: How to calculate timed-out peers?
+                if peer_info.status == PeerStatus::Dead {
+                    Some(peer_id.to_owned())
+                } else {
+                    None
+                }
+            })
+            .reduce(|acc, id| acc.join(id))?;
+
+        let new_id = recycling::claim_ids(self.id()?.clone(), dead_peers);
+
+        if &new_id != self.id()? {
+            debug!("Reclaimed Id: {new_id}");
+            self.propagativity = Propagativity::Resting(new_id, Instant::now());
+            self.set_raw(self.own_info.clone());
+            Some(())
+        } else {
+            debug!("No Reclaim");
+            None
+        }
+    }
+
     fn set_raw(&mut self, own_info: PeerInfo<A>) -> Option<()> {
         let mut removals = self.core_map.insert(self.id()?.clone(), own_info);
-        for (removed_id, info) in removals.drain(..) {
+        for (_removed_id, info) in removals.drain(..) {
             self.reality_token.push(info.uuid);
         }
         self.reality_token.push(self.uuid);
         Some(())
     }
 
-    fn create_patch(&self, peer_ts: &EventTree) -> BinaryPatch {
+    pub(crate) fn create_patch(&self, peer_ts: &EventTree) -> BinaryPatch {
         let itc_patch: Patch<PeerInfo<A>> = self.core_map.diff(peer_ts);
         BinaryPatch::new(itc_patch).expect("Error serializing patch")
     }
@@ -248,7 +286,7 @@ where
 
         match self.apply_patch(peer_rt, peer_patch) {
             Ok(()) => Ok(HandleMessageRes::response(self.msg_heartbeat())),
-            Err(PatchApplyError::RealitySkew(mut core)) => {
+            Err(PatchApplyError::RealitySkew(core)) => {
                 if peer_count > self.peer_count()
                     || peer_count == self.peer_count() && peer_rt > self.reality_token
                 {
@@ -284,7 +322,7 @@ where
         };
 
         // Only reset ourselves if we have no ID
-        if let Some(id) = self.propagativity.id() {
+        if self.propagativity.id().is_some() {
             return self.msg_heartbeat();
         }
 
@@ -301,7 +339,7 @@ where
         }
     }
 
-    fn msg_heartbeat(&self) -> Option<PollinationMessage> {
+    pub(crate) fn msg_heartbeat(&self) -> Option<PollinationMessage> {
         let id = self.id()?.clone();
         Some(PollinationMessage::Heartbeat {
             uuid: self.uuid,
@@ -311,7 +349,7 @@ where
         })
     }
 
-    fn msg_update(&self, patch: BinaryPatch) -> Option<PollinationMessage> {
+    pub(crate) fn msg_update(&self, patch: BinaryPatch) -> Option<PollinationMessage> {
         let id = self.id()?.clone();
         Some(PollinationMessage::Update {
             uuid: self.uuid,
@@ -353,6 +391,19 @@ where
     }
 }
 
+impl<A> fmt::Display for Nucleus<A>
+where
+    A: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "id:{} - rt:{} - uuid:{} - own:{} - map:{}",
+            self.propagativity, self.reality_token, self.uuid, self.own_info, self.core_map
+        )
+    }
+}
+
 pub struct HandleMessageRes<A> {
     response: Option<PollinationMessage>,
     old_core: Option<Nucleus<A>>,
@@ -384,7 +435,7 @@ impl<A> From<Option<PollinationMessage>> for HandleMessageRes<A> {
 }
 
 #[derive(Error, Debug)]
-enum NucleusError {
+pub enum NucleusError {
     #[error("Deserialization error: {0}")]
     DeserializationError(#[from] bincode::error::DecodeError),
 
