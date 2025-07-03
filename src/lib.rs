@@ -8,6 +8,7 @@ mod handle;
 mod nucleus;
 mod peer_info;
 mod propagativity;
+mod serialization;
 //mod flower;
 
 pub mod connection;

@@ -4,6 +4,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
+use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc};
 use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -40,7 +41,10 @@ impl Engine for AxumEngine {
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
-                    Some(msg) => {}
+                    Some(msg) => {
+                        let client = reqwest::Client::new();
+                        let res = client.post(msg.addr).body(msg.pollination_msg.serialize());
+                    }
                     None => {
                         info!("Channel closed")
                     }
@@ -80,4 +84,19 @@ pub enum AxumEngineError {
 struct AppState<A> {
     tx: Sender<EngineMessage<A>>,
     addr: Url,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AxumMessage<A> {
+    return_addr: A,
+    pollination_msg: PollinationMessage,
+}
+
+impl<A> AxumMessage<A> {
+    fn new(return_addr: A, pollination_msg: PollinationMessage) -> Self {
+        Self {
+            return_addr,
+            pollination_msg,
+        }
+    }
 }

@@ -3,7 +3,9 @@ use crate::{
     message::PollinationMessage,
     nucleus::{Nucleus, NucleusError, NucleusResponse},
 };
+use tokio::sync::mpsc::Sender;
 
+#[cfg(feature = "axum")]
 pub mod axum;
 
 pub trait Engine {
@@ -19,4 +21,5 @@ pub trait Engine {
 pub struct EngineMessage<A> {
     pollination_msg: PollinationMessage,
     addr: A,
+    tx: Sender<EngineMessage<A>>,
 }

@@ -437,7 +437,7 @@ impl<A> From<Option<PollinationMessage>> for NucleusResponse<A> {
 #[derive(Error, Debug)]
 pub enum NucleusError {
     #[error("Deserialization error: {0}")]
-    DeserializationError(#[from] bincode::error::DecodeError),
+    DeserializationError(#[from] crate::serialization::DeserializeError),
 
     #[error("Patch application error")]
     PatchApplyError,
@@ -462,5 +462,5 @@ enum PatchApplyError<A> {
     SelfRemoved,
 
     #[error("Deserialization error: {0}")]
-    DeserializationError(#[from] bincode::error::DecodeError),
+    DeserializationError(#[from] crate::serialization::DeserializeError),
 }

@@ -35,11 +35,13 @@ http-serde = "2.1.1"
 anyhow = "1.0.97"
 rand = "0.9.0"
 thiserror = "2.0.12"
+
 serde_json = { version = "1.0.140", optional = true }
 serde_path_to_error = { version = "0.1.17", optional = true }
-axum = "0.8.4"
-url = { version = "2.5.4", features = ["serde"] }
-async-channel = "2.3.1"
+
+axum = { version = "0.8.4", optional = true }
+url = { version = "2.5.4", features = ["serde"], optional = true }
+reqwest = { version = "0.12.22", default-features = false, features = ["rustls-tls", "http2", "system-proxy"], optional = true }
 
 [dev-dependencies]
 clap = { version = "4.5.35", features = ["derive"] }
@@ -50,4 +52,5 @@ tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
 tonic-build = "0.12.3"
 
 [features]
-json=["serde_json", "serde_path_to_error"]
+json=["dep:serde_json", "dep:serde_path_to_error"]
+axum=["dep:axum", "dep:reqwest", "dep:url"]
