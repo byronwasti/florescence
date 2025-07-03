@@ -1,6 +1,6 @@
 use tokio::sync::mpsc::{Receiver, Sender, channel, error::SendError};
 
-pub struct WalkieTalkie<T, U> {
+pub struct WalkieTalkie<T, U = T> {
     tx: Sender<T>,
     rx: Receiver<U>,
 }

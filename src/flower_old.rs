@@ -4,8 +4,8 @@ use crate::{
     ds::{StableVec, WalkieTalkie},
     engine_old::Engine,
     handle::FlowerHandle,
-    message::{PollinationMessage},
-    nucleus::{Nucleus},
+    message::PollinationMessage,
+    nucleus::Nucleus,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -140,6 +140,8 @@ where
 
         let msg = self.nucleus.handle_message(message);
 
+        let msg = todo!();
+
         if let Some(msg) = msg {
             debug!("o {idx}: {msg}");
             // TODO: Handle errors
@@ -184,7 +186,7 @@ where
 
     /*
     async fn broadcast_death(&self, old_nucleus: Nucleus<E::Addr>) {
-        for (idx, conn) in 
+        for (idx, conn) in
     }
     */
 

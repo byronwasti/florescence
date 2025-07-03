@@ -187,7 +187,7 @@ where
     pub(crate) fn handle_message(
         &mut self,
         message: PollinationMessage,
-    ) -> Result<HandleMessageRes<A>, NucleusError> {
+    ) -> Result<NucleusResponse<A>, NucleusError> {
         use PollinationMessage::*;
         match message {
             Heartbeat { .. } => Ok(self.handle_heartbeat(message).into()),
@@ -272,7 +272,7 @@ where
     fn handle_reality_skew(
         &mut self,
         message: PollinationMessage,
-    ) -> Result<HandleMessageRes<A>, NucleusError> {
+    ) -> Result<NucleusResponse<A>, NucleusError> {
         let PollinationMessage::RealitySkew {
             timestamp: peer_ts,
             reality_token: peer_rt,
@@ -285,16 +285,16 @@ where
         };
 
         match self.apply_patch(peer_rt, peer_patch) {
-            Ok(()) => Ok(HandleMessageRes::response(self.msg_heartbeat())),
+            Ok(()) => Ok(NucleusResponse::response(self.msg_heartbeat())),
             Err(PatchApplyError::RealitySkew(core)) => {
                 if peer_count > self.peer_count()
                     || peer_count == self.peer_count() && peer_rt > self.reality_token
                 {
                     let old_core = self.swap_cores(core);
-                    Ok(HandleMessageRes::core_dump(self.msg_new_member(), old_core))
+                    Ok(NucleusResponse::core_dump(self.msg_new_member(), old_core))
                 } else {
                     let patch = self.create_patch(&peer_ts);
-                    Ok(HandleMessageRes::response(self.msg_reality_skew(patch)))
+                    Ok(NucleusResponse::response(self.msg_reality_skew(patch)))
                 }
             }
             Err(PatchApplyError::SelfRemoved) => unreachable!(),
@@ -404,12 +404,12 @@ where
     }
 }
 
-pub struct HandleMessageRes<A> {
+pub struct NucleusResponse<A> {
     response: Option<PollinationMessage>,
     old_core: Option<Nucleus<A>>,
 }
 
-impl<A> HandleMessageRes<A> {
+impl<A> NucleusResponse<A> {
     fn response(response: Option<PollinationMessage>) -> Self {
         Self {
             response,
@@ -425,7 +425,7 @@ impl<A> HandleMessageRes<A> {
     }
 }
 
-impl<A> From<Option<PollinationMessage>> for HandleMessageRes<A> {
+impl<A> From<Option<PollinationMessage>> for NucleusResponse<A> {
     fn from(response: Option<PollinationMessage>) -> Self {
         Self {
             response,
