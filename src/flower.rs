@@ -1,4 +1,7 @@
-use crate::nucleus::{Nucleus, NucleusError};
+use crate::{
+    nucleus::{Nucleus, NucleusError},
+    engine::{Engine, EngineRequest, EngineEvent},
+};
 
 pub struct Flower<E: Engine<PollinationMessage>> {
     nucleus: Nucleus<E::Addr>,

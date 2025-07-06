@@ -5,7 +5,9 @@ use crate::{
 };
 use tokio::sync::mpsc::Sender;
 
-#[cfg(feature = "axum")]
+const DEFAULT_CHANNEL_SIZE: usize = 10;
+
+//#[cfg(feature = "axum")]
 pub mod axum;
 
 pub trait Engine {
@@ -15,11 +17,16 @@ pub trait Engine {
     async fn run(
         self,
         addr: Self::Addr,
-    ) -> Result<WalkieTalkie<EngineMessage<Self::Addr>>, Self::Error>;
+    ) -> Result<WalkieTalkie<EngineRequest<Self::Addr>, EngineEvent>, Self::Error>;
 }
 
-pub struct EngineMessage<A> {
+pub struct EngineRequest<A> {
     pollination_msg: PollinationMessage,
     addr: A,
-    tx: Sender<EngineMessage<A>>,
+    tx: Sender<PollinationMessage>,
+}
+
+pub struct EngineEvent {
+    pollination_msg: PollinationMessage,
+    tx: Sender<PollinationMessage>,
 }

@@ -82,14 +82,6 @@ impl PollinationMessage {
             }
         }
     }
-
-    fn serialize(self) -> Vec<u8> {
-        todo!()
-    }
-
-    fn deserialize(bytes: Vec<u8>) -> Self {
-        todo!()
-    }
 }
 
 impl std::fmt::Display for PollinationMessage {
