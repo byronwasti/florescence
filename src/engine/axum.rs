@@ -24,7 +24,7 @@ pub struct AxumEngine {
 }
 
 impl AxumEngine {
-    fn new(socket_addr: SocketAddr) -> Self {
+    pub fn new(socket_addr: SocketAddr) -> Self {
         Self { socket_addr }
     }
 }
@@ -33,17 +33,16 @@ impl Engine for AxumEngine {
     type Addr = Url;
     type Error = AxumEngineError;
 
-    async fn run(
+    async fn run_background(
         self,
-        addr: Self::Addr,
-    ) -> Result<WalkieTalkie<EngineRequest<Self::Addr>, EngineEvent>, Self::Error> {
+    ) -> Result<(Sender<EngineRequest<Self::Addr>>, Receiver<EngineEvent>), Self::Error> {
         let (wt0, wt1) = WalkieTalkie::pair();
 
         let (tx, rx) = wt1.split();
 
         tokio::spawn(sender_task(rx));
 
-        let state = Arc::new(AppState { tx, addr });
+        let state = Arc::new(AppState { tx });
 
         let app = Router::new()
             .route("/", post(handle_message))
@@ -57,7 +56,7 @@ impl Engine for AxumEngine {
             }
         });
 
-        Ok(wt0)
+        Ok(wt0.split())
     }
 }
 
@@ -149,7 +148,6 @@ pub enum AxumEngineError {
 
 struct AppState {
     tx: Sender<EngineEvent>,
-    addr: Url,
 }
 
 #[derive(Serialize, Deserialize)]

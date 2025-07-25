@@ -3,30 +3,31 @@ use crate::{
     message::PollinationMessage,
     nucleus::{Nucleus, NucleusError, NucleusResponse},
 };
-use tokio::sync::mpsc::Sender;
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, fmt, hash::Hash};
+use tokio::sync::mpsc::{Receiver, Sender};
 
 const DEFAULT_CHANNEL_SIZE: usize = 10;
 
-//#[cfg(feature = "axum")]
+#[cfg(feature = "axum")]
 pub mod axum;
 
-pub trait Engine {
-    type Addr;
-    type Error;
+pub trait Engine: 'static {
+    type Addr: Clone + Serialize + for<'de> Deserialize<'de> + Hash + fmt::Display + Send;
+    type Error: std::error::Error + 'static;
 
-    async fn run(
+    async fn run_background(
         self,
-        addr: Self::Addr,
-    ) -> Result<WalkieTalkie<EngineRequest<Self::Addr>, EngineEvent>, Self::Error>;
+    ) -> Result<(Sender<EngineRequest<Self::Addr>>, Receiver<EngineEvent>), Self::Error>;
 }
 
 pub struct EngineRequest<A> {
-    pollination_msg: PollinationMessage,
-    addr: A,
-    tx: Sender<PollinationMessage>,
+    pub pollination_msg: PollinationMessage,
+    pub addr: A,
+    pub tx: Sender<PollinationMessage>,
 }
 
 pub struct EngineEvent {
-    pollination_msg: PollinationMessage,
-    tx: Sender<PollinationMessage>,
+    pub pollination_msg: PollinationMessage,
+    pub tx: Sender<PollinationMessage>,
 }

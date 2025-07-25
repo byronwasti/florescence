@@ -1,46 +1,50 @@
 use crate::{reality_token::RealityToken, serialization::*};
 use serde::{Deserialize, Serialize};
+use std::hash::Hash;
 use treeclocks::{EventTree, IdTree};
 use uuid::Uuid;
+
+pub use crate::topic::Topic;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum PollinationMessage {
     Heartbeat {
         uuid: Uuid,
+        topic: Topic,
         id: IdTree,
-        //topic: String,
         timestamp: EventTree,
         reality_token: RealityToken,
     },
     Update {
         uuid: Uuid,
+        topic: Topic,
         id: IdTree,
-        //topic: String,
         timestamp: EventTree,
         reality_token: RealityToken,
         patch: BinaryPatch,
     },
     RealitySkew {
         uuid: Uuid,
+        topic: Topic,
         id: IdTree,
-        //topic: String,
         timestamp: EventTree,
         reality_token: RealityToken,
         patch: BinaryPatch,
         peer_count: usize,
     },
-    NewMember {
-        uuid: Uuid,
-    },
     Seed {
         uuid: Uuid,
+        topic: Topic,
         id: IdTree,
-        //topic: String,
         timestamp: EventTree,
         reality_token: RealityToken,
         patch: BinaryPatch,
         peer_count: usize,
         new_id: Option<IdTree>,
+    },
+    NewMember {
+        topic: Topic,
+        uuid: Uuid,
     },
 }
 
@@ -53,6 +57,17 @@ impl PollinationMessage {
             | Update { timestamp, .. }
             | RealitySkew { timestamp, .. }
             | Seed { timestamp, .. } => Some(timestamp),
+        }
+    }
+
+    pub fn topic(&self) -> Topic {
+        use PollinationMessage::*;
+        match self {
+            NewMember { topic, .. }
+            | Heartbeat { topic, .. }
+            | Update { topic, .. }
+            | RealitySkew { topic, .. }
+            | Seed { topic, .. } => topic.clone()
         }
     }
 
@@ -90,14 +105,16 @@ impl std::fmt::Display for PollinationMessage {
         match self {
             Heartbeat {
                 uuid,
+                topic,
                 id,
                 timestamp,
                 reality_token,
             } => {
-                write!(f, "HB - {uuid} - {id} - {timestamp} - {reality_token}")
+                write!(f, "HEARTBEAT UUID:{uuid} TOPIC:{topic} ID:{id} TS:{timestamp} RT:{reality_token}")
             }
             Update {
                 uuid,
+                topic,
                 id,
                 timestamp,
                 reality_token,
@@ -105,11 +122,12 @@ impl std::fmt::Display for PollinationMessage {
             } => {
                 write!(
                     f,
-                    "UP - {uuid} - {id} - {timestamp} - {reality_token} - {patch}"
+                    "UPDATE UUID:{uuid} TOPIC:{topic} ID:{id} TS:{timestamp} RT:{reality_token} PATCH:{patch}"
                 )
             }
             RealitySkew {
                 uuid,
+                topic,
                 id,
                 timestamp,
                 reality_token,
@@ -118,25 +136,27 @@ impl std::fmt::Display for PollinationMessage {
             } => {
                 write!(
                     f,
-                    "RS - {uuid} - {id} - {timestamp} - {reality_token} - {peer_count} - {patch}"
+                    "REALITY_SKEW UUID:{uuid} TOPIC:{topic} ID:{id} TS:{timestamp} RT:{reality_token} PEER_COUNT:{peer_count} PATCH:{patch}"
                 )
-            }
-            NewMember { uuid } => {
-                write!(f, "NM - {uuid}")
             }
             Seed {
                 uuid,
+                topic,
                 id,
                 timestamp,
                 reality_token,
                 new_id,
                 peer_count,
                 patch,
+                ..
             } => {
                 write!(
                     f,
-                    "SE - {uuid} - {id} - {timestamp} - {reality_token} - {peer_count} - {new_id:?} - {patch}"
+                    "SEED UUID:{uuid} TOPIC:{topic} ID:{id} TS:{timestamp} RT:{reality_token} PEER_COUNT:{peer_count} NEW_ID:{new_id:?} PATH:{patch}"
                 )
+            }
+            NewMember { uuid, topic, .. } => {
+                write!(f, "NEW_MEMBER UUID:{uuid} TOPIC:{topic}")
             }
         }
     }

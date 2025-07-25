@@ -134,7 +134,7 @@ where
         conn.peer_ts = message.timestamp().cloned();
     }
 
-    async fn handle_msg(&mut self, idx: usize, message: PollinationMessage) {
+    async fn handle_message(&mut self, idx: usize, message: PollinationMessage) {
         debug!("s0 {self}");
         debug!("i {idx}: {message}");
 

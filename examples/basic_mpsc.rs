@@ -1,6 +1,10 @@
+fn main() {
+}
+
+/*
 use anyhow::Result;
 use florescence::{
-    Flower, FlowerHandle,
+    FlowerCore, FlowerHandle,
     engine_old::{Engine, mpsc::MpscEngine},
     message::PollinationMessage,
 };
@@ -78,3 +82,4 @@ where
 
     Ok(flower)
 }
+*/

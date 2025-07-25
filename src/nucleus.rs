@@ -1,5 +1,5 @@
 use crate::{
-    message::{BinaryPatch, PollinationMessage},
+    message::{BinaryPatch, PollinationMessage, Topic},
     peer_info::{PeerInfo, PeerStatus},
     propagativity::Propagativity,
     reality_token::RealityToken,
@@ -9,12 +9,14 @@ use std::{cmp::Ordering, fmt, time::Instant};
 use thiserror::Error;
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 use uuid::Uuid;
+use rand::{SeedableRng, rngs::StdRng, Rng, seq::SliceRandom};
 
 mod recycling;
 
 #[derive(Clone, Debug)]
 pub struct Nucleus<A> {
     uuid: Uuid,
+    topic: Topic,
     propagativity: Propagativity,
     reality_token: RealityToken,
     core_map: ItcMap<PeerInfo<A>>,
@@ -25,13 +27,14 @@ impl<A> Nucleus<A>
 where
     A: Clone + for<'a> Deserialize<'a> + Serialize,
 {
-    pub(crate) fn new(uuid: Uuid, own_data: A) -> Self {
+    pub(crate) fn new(uuid: Uuid, topic: Topic, own_data: A) -> Self {
         let own_info = PeerInfo::new(uuid, own_data);
         let reality_token = RealityToken::new(uuid);
         let mut core_map = ItcMap::new();
         core_map.insert(IdTree::One, own_info.clone());
         Self {
-            propagativity: Propagativity::Resting(IdTree::One, Instant::now()),
+            propagativity: Propagativity::Propagating(IdTree::One),
+            topic,
             reality_token,
             core_map,
             uuid,
@@ -56,49 +59,42 @@ where
         self.set_raw(self.own_info.clone());
     }
 
-    pub(crate) fn reap_souls(&mut self) -> bool {
-        self.reap_souls_inner().is_some()
-    }
-
-    fn reap_souls_inner(&mut self) -> Option<()> {
-        let dead_peers: IdTree = self
-            .core_map
-            .iter()
-            .filter_map(|(peer_id, peer_info)| {
-                // TODO: How to calculate timed-out peers?
-                if peer_info.status == PeerStatus::Dead {
-                    Some(peer_id.to_owned())
-                } else {
-                    None
-                }
-            })
-            .reduce(|acc, id| acc.join(id))?;
-
-        let new_id = recycling::claim_ids(self.id()?.clone(), dead_peers);
-
-        if &new_id != self.id()? {
-            debug!("Reclaimed Id: {new_id}");
-            self.propagativity = Propagativity::Resting(new_id, Instant::now());
-            self.set_raw(self.own_info.clone());
-            Some(())
-        } else {
-            debug!("No Reclaim");
-            None
-        }
+    pub(crate) fn peers(&self) -> impl Iterator<Item = (&IdTree, &PeerInfo<A>)> {
+        self.core_map.iter()
     }
 
     fn set_raw(&mut self, own_info: PeerInfo<A>) -> Option<()> {
+        let dead = matches!(own_info.status, PeerStatus::Dead);
         let mut removals = self.core_map.insert(self.id()?.clone(), own_info);
         for (_removed_id, info) in removals.drain(..) {
             self.reality_token.push(info.uuid);
         }
-        self.reality_token.push(self.uuid);
+        if !dead {
+            self.reality_token.push(self.uuid);
+        }
         Some(())
     }
 
-    pub(crate) fn create_patch(&self, peer_ts: &EventTree) -> BinaryPatch {
+    fn create_patch(&self, peer_ts: &EventTree) -> BinaryPatch {
         let itc_patch: Patch<PeerInfo<A>> = self.core_map.diff(peer_ts);
         BinaryPatch::new(itc_patch).expect("Error serializing patch")
+    }
+
+    /// NOTE: Not a clean swap; the new core has most information
+    /// wiped. This is a helper function to efficiently reset.
+    fn swap_cores(&mut self, mut other: Nucleus<A>) -> Nucleus<A> {
+        self.set_raw(PeerInfo::dead());
+        std::mem::swap(self, &mut other);
+        self.propagativity = Propagativity::Unknown;
+        self.core_map = ItcMap::new();
+        self.reality_token = RealityToken::zero();
+        other
+    }
+
+    fn propagate(&mut self) -> Option<IdTree> {
+        let new_id = self.propagativity.propagate()?;
+        self.set_raw(self.own_info.clone())?;
+        Some(new_id)
     }
 
     /// NOTE: Doesn't return PatchApplyError::SelfRemoved
@@ -126,7 +122,7 @@ where
             match self.apply_patch_unchecked(patch) {
                 Ok(()) => {
                     if self.reality_token != peer_rt {
-                        panic!("Reality token mismatch after a clean update");
+                        panic!("Reality token mismatch after a clean update. This is a bug. {} != {peer_rt}", self.reality_token);
                     } else {
                         Ok(())
                     }
@@ -166,20 +162,35 @@ where
         }
     }
 
-    /// NOTE: Not a clean swap; the new core has most information
-    /// wiped. This is a helper function to efficiently reset.
-    fn swap_cores(&mut self, mut other: Nucleus<A>) -> Nucleus<A> {
-        std::mem::swap(self, &mut other);
-        self.propagativity = Propagativity::Unknown;
-        self.core_map = ItcMap::new();
-        self.reality_token = RealityToken::new(self.uuid);
-        other
+    pub(crate) fn reap_souls(&mut self) -> bool {
+        self.reap_souls_inner().is_some()
     }
 
-    fn propagate(&mut self) -> Option<IdTree> {
-        let new_id = self.propagativity.propagate()?;
-        self.set_raw(self.own_info.clone())?;
-        Some(new_id)
+    fn reap_souls_inner(&mut self) -> Option<()> {
+        let dead_peers: IdTree = self
+            .core_map
+            .iter()
+            .filter_map(|(peer_id, peer_info)| {
+                // TODO: How to calculate timed-out peers?
+                if peer_info.status == PeerStatus::Dead {
+                    Some(peer_id.to_owned())
+                } else {
+                    None
+                }
+            })
+            .reduce(|acc, id| acc.join(id))?;
+
+        let new_id = recycling::claim_ids(self.id()?.clone(), dead_peers);
+
+        if &new_id != self.id()? {
+            debug!("Reclaimed Id: {new_id}");
+            self.propagativity = Propagativity::Resting(new_id, Instant::now());
+            self.set_raw(self.own_info.clone());
+            Some(())
+        } else {
+            debug!("No Reclaim");
+            None
+        }
     }
 
     /* Message Handling */
@@ -214,15 +225,14 @@ where
 
         match self.timestamp().partial_cmp(&peer_ts) {
             Some(Ordering::Greater) | None => {
-                let patch = self.create_patch(&peer_ts);
-                self.msg_update(patch)
+                self.msg_update(&peer_ts)
             }
             Some(Ordering::Less) => self.msg_heartbeat(),
             Some(Ordering::Equal) => {
                 if peer_rt != self.reality_token {
-                    let patch = self.create_patch(&peer_ts);
-                    self.msg_reality_skew(patch)
+                    self.msg_reality_skew(&peer_ts)
                 } else {
+                    info!("Peer is equivalent {} == {peer_rt}", self.reality_token);
                     None
                 }
             }
@@ -245,23 +255,20 @@ where
 
         match self.timestamp().partial_cmp(&peer_ts) {
             Some(Ordering::Greater) => {
-                let patch = self.create_patch(&peer_ts);
-                Ok(self.msg_update(patch))
+                Ok(self.msg_update(&peer_ts))
             }
 
             Some(Ordering::Less) | None => match self.apply_patch(peer_rt, peer_patch) {
                 Ok(()) => Ok(self.msg_heartbeat()),
                 Err(PatchApplyError::RealitySkew(_)) => {
-                    let patch = self.create_patch(&peer_ts);
-                    Ok(self.msg_reality_skew(patch))
+                    Ok(self.msg_reality_skew(&peer_ts))
                 }
                 Err(err) => Err(err.into()),
             },
 
             Some(Ordering::Equal) => {
                 if peer_rt != self.reality_token {
-                    let patch = self.create_patch(&peer_ts);
-                    Ok(self.msg_reality_skew(patch))
+                    Ok(self.msg_reality_skew(&peer_ts))
                 } else {
                     Ok(None)
                 }
@@ -293,8 +300,7 @@ where
                     let old_core = self.swap_cores(core);
                     Ok(NucleusResponse::core_dump(self.msg_new_member(), old_core))
                 } else {
-                    let patch = self.create_patch(&peer_ts);
-                    Ok(NucleusResponse::response(self.msg_reality_skew(patch)))
+                    Ok(NucleusResponse::response(self.msg_reality_skew(&peer_ts)))
                 }
             }
             Err(PatchApplyError::SelfRemoved) => unreachable!(),
@@ -330,8 +336,7 @@ where
             let _ = self.apply_patch_unchecked(peer_patch);
             self.propagativity = Propagativity::Resting(id, Instant::now());
             self.set_raw(self.own_info.clone());
-            let patch = self.create_patch(&peer_ts);
-            self.msg_update(patch)
+            self.msg_update(&peer_ts)
         } else {
             let _ = self.apply_patch_unchecked(peer_patch);
             self.reality_token = peer_rt;
@@ -343,16 +348,19 @@ where
         let id = self.id()?.clone();
         Some(PollinationMessage::Heartbeat {
             uuid: self.uuid,
+            topic: self.topic.clone(),
             id,
             timestamp: self.timestamp().to_owned(),
             reality_token: self.reality_token,
         })
     }
 
-    pub(crate) fn msg_update(&self, patch: BinaryPatch) -> Option<PollinationMessage> {
+    pub(crate) fn msg_update(&self, peer_ts: &EventTree) -> Option<PollinationMessage> {
         let id = self.id()?.clone();
+        let patch = self.create_patch(peer_ts);
         Some(PollinationMessage::Update {
             uuid: self.uuid,
+            topic: self.topic.clone(),
             id,
             timestamp: self.timestamp().to_owned(),
             reality_token: self.reality_token,
@@ -360,10 +368,12 @@ where
         })
     }
 
-    fn msg_reality_skew(&self, patch: BinaryPatch) -> Option<PollinationMessage> {
+    fn msg_reality_skew(&self, peer_ts: &EventTree) -> Option<PollinationMessage> {
         let id = self.id()?.clone();
+        let patch = self.create_patch(peer_ts);
         Some(PollinationMessage::RealitySkew {
             uuid: self.uuid,
+            topic: self.topic.clone(),
             id,
             timestamp: self.timestamp().to_owned(),
             reality_token: self.reality_token,
@@ -373,7 +383,10 @@ where
     }
 
     fn msg_new_member(&self) -> Option<PollinationMessage> {
-        Some(PollinationMessage::NewMember { uuid: self.uuid })
+        Some(PollinationMessage::NewMember {
+            uuid: self.uuid,
+            topic: self.topic.clone(),
+        })
     }
 
     fn msg_seed(&self, new_id: Option<IdTree>) -> Option<PollinationMessage> {
@@ -381,6 +394,7 @@ where
         let patch = self.create_patch(&EventTree::Leaf(0));
         Some(PollinationMessage::Seed {
             uuid: self.uuid,
+            topic: self.topic.clone(),
             id,
             timestamp: self.timestamp().to_owned(),
             reality_token: self.reality_token,
@@ -398,15 +412,15 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
-            "id:{} - rt:{} - uuid:{} - own:{} - map:{}",
-            self.propagativity, self.reality_token, self.uuid, self.own_info, self.core_map
+            "UUID:{} TOPIC:{} ID:{} RT:{} OWN_INFO:({}) CORE_MAP:({})",
+            self.uuid, self.topic, self.propagativity, self.reality_token, self.own_info, self.core_map
         )
     }
 }
 
 pub struct NucleusResponse<A> {
-    response: Option<PollinationMessage>,
-    old_core: Option<Nucleus<A>>,
+    pub response: Option<PollinationMessage>,
+    pub old_core: Option<Nucleus<A>>,
 }
 
 impl<A> NucleusResponse<A> {
@@ -463,4 +477,137 @@ enum PatchApplyError<A> {
 
     #[error("Deserialization error: {0}")]
     DeserializationError(#[from] crate::serialization::DeserializeError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::Engine;
+    use tracing_test::traced_test;
+
+    #[test]
+    #[traced_test]
+    fn test_nucleus() {
+        let mut rng = StdRng::seed_from_u64(100);
+
+        let count = 5;
+        let mut nuclei = (0..count)
+            .map(|i| Nucleus::new(
+                    Uuid::from_u128(rng.random()),
+                    Topic::new("test".to_string()),
+                    i,
+            )).collect::<Vec<_>>();
+
+        for _ in 0..1000 {
+            let mut idxs = (0..count).collect::<Vec<_>>();
+            idxs.shuffle(&mut rng);
+            for i in idxs {
+                // Includes Self but that is okay and we should test that fact.
+                let j = rng.gen_range(0..count);
+
+                println!("SYNC {i} -> {j}");
+                let sync_res = sync_two(&mut rng, &mut nuclei, i, j);
+                println!("END\n");
+                if let Some(old_core) = sync_res {
+                    println!("NOTIFYING KIN");
+                    notify_of_death(&mut rng, &mut nuclei, old_core);
+                    println!("END\n");
+                }
+
+                for i in 0..count {
+                    println!("STATE {i}: {}", nuclei[i]);
+                    // Reset propagativity so we don't have to wait
+                    nuclei[i].propagativity.force_propagating();
+
+                    // Also do any cleanup
+                    // TODO: Test delayed cleanup
+                    if nuclei[i].reap_souls() {
+                        println!("{i} REAPED SOULS");
+                    }
+                }
+
+                println!("");
+            }
+
+            let mut iter = nuclei.iter().map(|n| n.reality_token);
+            let first = iter.next().unwrap();
+            if iter.all(|rt| rt == first) {
+                println!("CONVERGED");
+                break
+            }
+        }
+
+        println!("END SIMULATION");
+        let mut summed_ids = IdTree::zero();
+        for i in 0..count {
+            println!("END STATE {i}: {}", nuclei[i]);
+            if let Some(id) = nuclei[i].id() {
+                summed_ids = summed_ids.join(id.to_owned());
+            }
+        }
+
+        println!("TOTAL ID SPACE: {summed_ids}");
+    }
+
+    fn notify_of_death<R: Rng>(rng: &mut R, nuclei: &mut [Nucleus<usize>], old_core: Nucleus<usize>) -> Option<()> {
+        for (_, peer) in old_core.peers() {
+            // 10% chance of failure
+            if rng.random_bool(0.10) {
+                println!("DEATH NOTIFICATION LOOP ENDED EARLY");
+                break
+            }
+
+            if peer.addr.is_none() {
+                println!("NO PEER ADDR FOR NOTIFICATION OF DEATH: {peer}");
+                continue
+            }
+            let peer_idx = peer.addr.unwrap();
+            let peer_nucl = &mut nuclei[peer_idx];
+            let msg = old_core.msg_update(peer_nucl.timestamp())?;
+            println!("{peer_idx} <- {msg}");
+            let _ = peer_nucl.handle_message(msg).expect("Nucleus hit an error");
+        }
+        None
+    }
+
+    fn sync_two<R: Rng>(rng: &mut R, nuclei: &mut [Nucleus<usize>], i: usize, j: usize) -> Option<Nucleus<usize>>
+    {
+        nuclei[i].bump();
+        let mut msg = nuclei[i].msg_heartbeat();
+        if msg.is_none() {
+            msg = nuclei[i].msg_new_member();
+        }
+
+        let mut old_core = None;
+        let mut iters = 0;
+        loop {
+            // 10% chance of failure
+            if rng.random_bool(0.10) {
+                println!("SYNC LOOP ENDED EARLY");
+                break old_core
+            }
+
+            iters += 1;
+            if iters >= 10 {
+                panic!("Too many iterations during sync");
+            }
+            for idx in [j, i] {
+                let res = match msg.take() {
+                    Some(msg) => {
+                        println!("{idx} <- {msg}");
+                        nuclei[idx].handle_message(msg)
+                    }
+                    None => {
+                        return old_core
+                    }
+                }.expect("Nucleus hit an error.");
+
+                msg = res.response;
+                if let Some(new_old_core) = res.old_core {
+                    assert!(old_core.is_none());
+                    old_core = Some(new_old_core);
+                }
+            }
+        }
+    }
 }

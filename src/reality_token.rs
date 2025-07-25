@@ -9,6 +9,10 @@ impl RealityToken {
         Self(uuid.as_u128())
     }
 
+    pub fn zero() -> Self {
+        Self(0)
+    }
+
     pub fn push(&mut self, uuid: Uuid) {
         self.0 ^= uuid.as_u128()
     }
