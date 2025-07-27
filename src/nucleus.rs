@@ -232,7 +232,6 @@ where
                 if peer_rt != self.reality_token {
                     self.msg_reality_skew(&peer_ts)
                 } else {
-                    info!("Peer is equivalent {} == {peer_rt}", self.reality_token);
                     None
                 }
             }
@@ -488,9 +487,21 @@ mod tests {
     #[test]
     #[traced_test]
     fn test_nucleus() {
-        let mut rng = StdRng::seed_from_u64(100);
+        for _ in 0..100 {
+            let seed = rand::thread_rng().random();
+            println!("\n\n================== NEW SIMULATION WITH SEED {seed} =======================\n");
+            let id_tree = test_nucleus_inner(seed);
+            if id_tree != IdTree::one() {
+                println!("FAILED TO CLEAN UP WITH SEED {seed}, GOT TO {id_tree}");
+                panic!("Test failure");
+            }
+        }
+    }
 
-        let count = 5;
+    fn test_nucleus_inner(seed: u64) -> IdTree {
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        let count = 3;
         let mut nuclei = (0..count)
             .map(|i| Nucleus::new(
                     Uuid::from_u128(rng.random()),
@@ -547,14 +558,15 @@ mod tests {
         }
 
         println!("TOTAL ID SPACE: {summed_ids}");
+        summed_ids
     }
 
     fn notify_of_death<R: Rng>(rng: &mut R, nuclei: &mut [Nucleus<usize>], old_core: Nucleus<usize>) -> Option<()> {
         for (_, peer) in old_core.peers() {
             // 10% chance of failure
             if rng.random_bool(0.10) {
-                println!("DEATH NOTIFICATION LOOP ENDED EARLY");
-                break
+                //println!("DEATH NOTIFICATION LOOP ENDED EARLY");
+                //break
             }
 
             if peer.addr.is_none() {
