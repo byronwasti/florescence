@@ -1,13 +1,12 @@
 use anyhow::Result;
-use florescence::{Flower, engine::axum::AxumEngine};
 use clap::Parser;
-use url::Url;
-use tracing_subscriber::FmtSubscriber;
+use florescence::{Flower, engine::axum::AxumEngine};
 use tracing::info;
+use tracing_subscriber::FmtSubscriber;
+use url::Url;
 
 #[derive(Parser, Debug)]
-struct Args {
-}
+struct Args {}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -18,7 +17,6 @@ async fn main() -> Result<()> {
         //.with_max_level(tracing::Level::DEBUG)
         .init();
 
-
     let mut seed_list = vec![];
     for port in 8000..8003 {
         let socket_addr = format!("0.0.0.0:{port}");
@@ -28,9 +26,9 @@ async fn main() -> Result<()> {
 
         let flower = Flower::builder()
             .engine(AxumEngine::new(socket_addr))
-                .own_addr(url.clone())
-                .seed_list(seed_list.clone())
-                .start();
+            .own_addr(url.clone())
+            .seed_list(seed_list.clone())
+            .start();
 
         info!("Flower started at {url}");
         seed_list.push(url);

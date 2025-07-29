@@ -67,7 +67,7 @@ impl PollinationMessage {
             | Heartbeat { topic, .. }
             | Update { topic, .. }
             | RealitySkew { topic, .. }
-            | Seed { topic, .. } => topic.clone()
+            | Seed { topic, .. } => topic.clone(),
         }
     }
 
@@ -110,7 +110,10 @@ impl std::fmt::Display for PollinationMessage {
                 timestamp,
                 reality_token,
             } => {
-                write!(f, "HEARTBEAT UUID:{uuid} TOPIC:{topic} ID:{id} TS:{timestamp} RT:{reality_token}")
+                write!(
+                    f,
+                    "HEARTBEAT UUID:{uuid} TOPIC:{topic} ID:{id} TS:{timestamp} RT:{reality_token}"
+                )
             }
             Update {
                 uuid,

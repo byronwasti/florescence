@@ -4,12 +4,12 @@ use crate::{
     propagativity::Propagativity,
     reality_token::RealityToken,
 };
+use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, fmt, time::Instant};
+use std::{cmp::Ordering, fmt};
 use thiserror::Error;
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 use uuid::Uuid;
-use rand::{SeedableRng, rngs::StdRng, Rng, seq::SliceRandom};
 
 mod recycling;
 
@@ -122,7 +122,10 @@ where
             match self.apply_patch_unchecked(patch) {
                 Ok(()) => {
                     if self.reality_token != peer_rt {
-                        panic!("Reality token mismatch after a clean update. This is a bug. {} != {peer_rt}", self.reality_token);
+                        panic!(
+                            "Reality token mismatch after a clean update. This is a bug. {} != {peer_rt}",
+                            self.reality_token
+                        );
                     } else {
                         Ok(())
                     }
@@ -162,14 +165,37 @@ where
         }
     }
 
+    fn apply_seed_patch(&mut self, patch: BinaryPatch) -> Result<(), PatchApplyError<A>> {
+        let mut new_core = self.clone();
+        new_core.apply_patch_unchecked(patch)?;
+
+        let mut id_to_delete = None;
+        for (id, peer_info) in new_core.peers() {
+            if peer_info.uuid == self.uuid {
+                assert!(id_to_delete.is_none());
+                id_to_delete = Some(id);
+            }
+        }
+
+        if let Some(id) = id_to_delete {
+            // TODO: Rethink this logic
+            warn!("Seed patch for group already a member of; killing old ID");
+            new_core.propagativity = Propagativity::Propagating(id.clone());
+            new_core.set_raw(PeerInfo::dead());
+        }
+
+        *self = new_core;
+
+        Ok(())
+    }
+
     pub(crate) fn reap_souls(&mut self) -> bool {
         self.reap_souls_inner().is_some()
     }
 
     fn reap_souls_inner(&mut self) -> Option<()> {
         let dead_peers: IdTree = self
-            .core_map
-            .iter()
+            .peers()
             .filter_map(|(peer_id, peer_info)| {
                 // TODO: How to calculate timed-out peers?
                 if peer_info.status == PeerStatus::Dead {
@@ -184,12 +210,24 @@ where
 
         if &new_id != self.id()? {
             debug!("Reclaimed Id: {new_id}");
-            self.propagativity = Propagativity::Resting(new_id, Instant::now());
+            self.propagativity = Propagativity::Propagating(new_id);
             self.set_raw(self.own_info.clone());
             Some(())
         } else {
             debug!("No Reclaim");
             None
+        }
+    }
+
+    fn check_no_dupes(&self) {
+        let mut dupe_checker = std::collections::HashSet::new();
+        for (_, peer) in self.peers() {
+            let uuid = peer.uuid;
+            if dupe_checker.contains(&uuid) && uuid != Uuid::from_u128(0) {
+                panic!("DUPE with {uuid}");
+            }
+
+            dupe_checker.insert(uuid);
         }
     }
 
@@ -224,9 +262,7 @@ where
         };
 
         match self.timestamp().partial_cmp(&peer_ts) {
-            Some(Ordering::Greater) | None => {
-                self.msg_update(&peer_ts)
-            }
+            Some(Ordering::Greater) | None => self.msg_update(&peer_ts),
             Some(Ordering::Less) => self.msg_heartbeat(),
             Some(Ordering::Equal) => {
                 if peer_rt != self.reality_token {
@@ -253,15 +289,11 @@ where
         };
 
         match self.timestamp().partial_cmp(&peer_ts) {
-            Some(Ordering::Greater) => {
-                Ok(self.msg_update(&peer_ts))
-            }
+            Some(Ordering::Greater) => Ok(self.msg_update(&peer_ts)),
 
             Some(Ordering::Less) | None => match self.apply_patch(peer_rt, peer_patch) {
                 Ok(()) => Ok(self.msg_heartbeat()),
-                Err(PatchApplyError::RealitySkew(_)) => {
-                    Ok(self.msg_reality_skew(&peer_ts))
-                }
+                Err(PatchApplyError::RealitySkew(_)) => Ok(self.msg_reality_skew(&peer_ts)),
                 Err(err) => Err(err.into()),
             },
 
@@ -332,9 +364,10 @@ where
         }
 
         if let Some(id) = new_id {
-            let _ = self.apply_patch_unchecked(peer_patch);
-            self.propagativity = Propagativity::Resting(id, Instant::now());
+            let _ = self.apply_seed_patch(peer_patch);
+            self.propagativity = Propagativity::resting(id);
             self.set_raw(self.own_info.clone());
+            self.check_no_dupes();
             self.msg_update(&peer_ts)
         } else {
             let _ = self.apply_patch_unchecked(peer_patch);
@@ -412,7 +445,12 @@ where
         write!(
             f,
             "UUID:{} TOPIC:{} ID:{} RT:{} OWN_INFO:({}) CORE_MAP:({})",
-            self.uuid, self.topic, self.propagativity, self.reality_token, self.own_info, self.core_map
+            self.uuid,
+            self.topic,
+            self.propagativity,
+            self.reality_token,
+            self.own_info,
+            self.core_map
         )
     }
 }
@@ -487,9 +525,14 @@ mod tests {
     #[test]
     #[traced_test]
     fn test_nucleus() {
-        for _ in 0..100 {
+        // BAD SEEDS = [
+        //      16254458854126421037  w/ 3
+        // ]
+        for _ in 0..1 {
             let seed = rand::thread_rng().random();
-            println!("\n\n================== NEW SIMULATION WITH SEED {seed} =======================\n");
+            println!(
+                "\n\n================== NEW SIMULATION WITH SEED {seed} =======================\n"
+            );
             let id_tree = test_nucleus_inner(seed);
             if id_tree != IdTree::one() {
                 println!("FAILED TO CLEAN UP WITH SEED {seed}, GOT TO {id_tree}");
@@ -501,13 +544,16 @@ mod tests {
     fn test_nucleus_inner(seed: u64) -> IdTree {
         let mut rng = StdRng::seed_from_u64(seed);
 
-        let count = 3;
+        let count = 10;
         let mut nuclei = (0..count)
-            .map(|i| Nucleus::new(
+            .map(|i| {
+                Nucleus::new(
                     Uuid::from_u128(rng.random()),
                     Topic::new("test".to_string()),
                     i,
-            )).collect::<Vec<_>>();
+                )
+            })
+            .collect::<Vec<_>>();
 
         for _ in 0..1000 {
             let mut idxs = (0..count).collect::<Vec<_>>();
@@ -544,7 +590,7 @@ mod tests {
             let first = iter.next().unwrap();
             if iter.all(|rt| rt == first) {
                 println!("CONVERGED");
-                break
+                break;
             }
         }
 
@@ -561,7 +607,11 @@ mod tests {
         summed_ids
     }
 
-    fn notify_of_death<R: Rng>(rng: &mut R, nuclei: &mut [Nucleus<usize>], old_core: Nucleus<usize>) -> Option<()> {
+    fn notify_of_death<R: Rng>(
+        rng: &mut R,
+        nuclei: &mut [Nucleus<usize>],
+        old_core: Nucleus<usize>,
+    ) -> Option<()> {
         for (_, peer) in old_core.peers() {
             // 10% chance of failure
             if rng.random_bool(0.10) {
@@ -571,7 +621,7 @@ mod tests {
 
             if peer.addr.is_none() {
                 println!("NO PEER ADDR FOR NOTIFICATION OF DEATH: {peer}");
-                continue
+                continue;
             }
             let peer_idx = peer.addr.unwrap();
             let peer_nucl = &mut nuclei[peer_idx];
@@ -582,8 +632,12 @@ mod tests {
         None
     }
 
-    fn sync_two<R: Rng>(rng: &mut R, nuclei: &mut [Nucleus<usize>], i: usize, j: usize) -> Option<Nucleus<usize>>
-    {
+    fn sync_two<R: Rng>(
+        rng: &mut R,
+        nuclei: &mut [Nucleus<usize>],
+        i: usize,
+        j: usize,
+    ) -> Option<Nucleus<usize>> {
         nuclei[i].bump();
         let mut msg = nuclei[i].msg_heartbeat();
         if msg.is_none() {
@@ -596,7 +650,7 @@ mod tests {
             // 10% chance of failure
             if rng.random_bool(0.10) {
                 println!("SYNC LOOP ENDED EARLY");
-                break old_core
+                break old_core;
             }
 
             iters += 1;
@@ -609,10 +663,9 @@ mod tests {
                         println!("{idx} <- {msg}");
                         nuclei[idx].handle_message(msg)
                     }
-                    None => {
-                        return old_core
-                    }
-                }.expect("Nucleus hit an error.");
+                    None => return old_core,
+                }
+                .expect("Nucleus hit an error.");
 
                 msg = res.response;
                 if let Some(new_old_core) = res.old_core {

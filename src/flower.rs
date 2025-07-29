@@ -1,20 +1,19 @@
 use crate::{
+    constants,
     engine::{Engine, EngineEvent, EngineRequest},
     message::{PollinationMessage, Topic},
     nucleus::{Nucleus, NucleusError},
-    constants,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, hash::Hash, time::Duration};
 use thiserror::Error;
 use tokio::{
-    time::{MissedTickBehavior, interval},
     sync::mpsc::{Receiver, Sender},
+    time::{MissedTickBehavior, interval},
 };
 use uuid::Uuid;
 
-pub struct Flower {
-}
+pub struct Flower {}
 
 impl Flower {
     pub fn builder<E: Engine>() -> FlowerBuilder<E> {

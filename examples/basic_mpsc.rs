@@ -1,5 +1,4 @@
-fn main() {
-}
+fn main() {}
 
 /*
 use anyhow::Result;
