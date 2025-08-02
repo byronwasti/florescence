@@ -1,8 +1,5 @@
-use egui::{
-    Vec2,
-    Sense,
-    Frame
-};
+use egui::{Color32, Frame, Pos2, Rect, Scene, Sense, Shape, Stroke, Vec2, emath, vec2};
+use std::f32::consts::TAU;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -11,6 +8,12 @@ pub struct PollinationViewer {
 
     #[serde(skip)]
     value: f32,
+
+    #[serde(skip)]
+    point: Pos2,
+
+    #[serde(skip)]
+    scene: Rect,
 }
 
 impl Default for PollinationViewer {
@@ -18,6 +21,8 @@ impl Default for PollinationViewer {
         Self {
             label: "Hello World!".to_owned(),
             value: 2.7,
+            point: Pos2::new(50., 100.),
+            scene: Rect::ZERO,
         }
     }
 }
@@ -77,30 +82,32 @@ impl eframe::App for PollinationViewer {
             ui.allocate_space(ui.available_size());
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("eframe template");
+        let frame = egui::containers::Frame::new()
+            .inner_margin(egui::Margin::ZERO)
+            .outer_margin(egui::Margin::ZERO);
 
-            ui.horizontal(|ui| {
-                ui.label("Write something: ");
-                ui.text_edit_singleline(&mut self.label);
-            });
+        egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+            ui.label(format!("Scene rect: {:#?}", &mut self.scene));
+            Scene::new()
+                .max_inner_size([350.0, 1000.0])
+                .zoom_range(0.1..=2.0)
+                .show(ui, &mut self.scene, |ui| {
+                    let response = ui.allocate_response(ui.available_size(), Sense::hover());
+                    let painter = ui.painter().with_clip_rect(ui.clip_rect());
 
-            ui.add(egui::Slider::new(&mut self.value, 0.0..=10.0).text("value"));
-            if ui.button("Increment").clicked() {
-                self.value += 1.0;
-            }
+                    painter.add(Shape::circle_filled(
+                        Pos2::new(0., 0.),
+                        50.,
+                        Color32::DARK_GREEN,
+                    ));
 
-            Frame::canvas(ui.style()).show(ui, |ui| {
-                let (response, painter) =
-                    ui.allocate_painter(Vec2::new(ui.available_width(), 300.0), Sense::hover());
-                response
-            });
+                    let point_rect = Rect::from_center_size(self.point, vec2(100., 100.));
+                    let point_id = response.id.with(0);
+                    let point_response = ui.interact(point_rect, point_id, Sense::drag());
+                    self.point += point_response.drag_delta();
 
-
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                powered_by_egui_and_eframe(ui);
-                egui::warn_if_debug_build(ui);
-            });
+                    painter.add(Shape::circle_filled(self.point, 50., Color32::DARK_RED));
+                });
         });
     }
 }
