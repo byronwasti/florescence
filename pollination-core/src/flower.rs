@@ -59,6 +59,7 @@ where
                             msgs.push(msg);
                         }
                     }
+
                     for msg in msgs.drain(..) {
                         self.send(msg).await;
                     }

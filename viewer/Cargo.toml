@@ -21,9 +21,11 @@ eframe = { version = "0.32", default-features = false, features = [
     "x11",           # To support older Linux distributions (restores one of the default features)
 ] }
 log = "0.4.27"
+fdg = { git = "https://github.com/grantshandy/fdg" }
 
 # You only need serde if you want app persistence:
 serde = { version = "1.0.219", features = ["derive"] }
+petgraph = "0.8.2"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

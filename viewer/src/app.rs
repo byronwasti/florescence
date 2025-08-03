@@ -1,4 +1,11 @@
-use egui::{Color32, Frame, Pos2, Rect, Scene, Sense, Shape, Stroke, Vec2, emath, vec2};
+use egui::{Color32, Frame, Pos2, Rect, Scene, Sense, Shape, Stroke, Vec2, emath, pos2, vec2};
+use fdg::{
+    Force, ForceGraph,
+    fruchterman_reingold::{FruchtermanReingold, FruchtermanReingoldConfiguration},
+    nalgebra::Rotation2,
+    petgraph::Graph,
+    simple::Center,
+};
 use std::f32::consts::TAU;
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -14,15 +21,36 @@ pub struct PollinationViewer {
 
     #[serde(skip)]
     scene: Rect,
+
+    #[serde(skip)]
+    graph: ForceGraph<f32, 2, &'static str, ()>,
+
+    #[serde(skip)]
+    time: f64,
 }
 
 impl Default for PollinationViewer {
     fn default() -> Self {
+        let mut graph = Graph::<&str, ()>::new();
+        let pg = graph.add_node("petgraph");
+        let fb = graph.add_node("fixedbitset");
+        let qc = graph.add_node("quickcheck");
+        let rand = graph.add_node("rand");
+        let libc = graph.add_node("libc");
+        let gobo = graph.add_node("gobo");
+        let sobo = graph.add_node("sobo");
+        let lobo = graph.add_node("lobo");
+        graph.extend_with_edges(&[(pg, fb), (pg, qc), (qc, rand), (rand, libc), (qc, libc)]);
+        graph.extend_with_edges(&[(gobo, sobo), (gobo, lobo)]);
+        let graph: ForceGraph<f32, 2, &str, ()> = fdg::init_force_graph_uniform(graph, 200.0);
+
         Self {
             label: "Hello World!".to_owned(),
             value: 2.7,
             point: Pos2::new(50., 100.),
             scene: Rect::ZERO,
+            graph,
+            time: 0.,
         }
     }
 }
@@ -64,7 +92,6 @@ impl eframe::App for PollinationViewer {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     });
-                    ui.allocate_space(ui.available_size());
                     ui.add_space(16.0);
                 }
 
@@ -87,7 +114,21 @@ impl eframe::App for PollinationViewer {
             .outer_margin(egui::Margin::ZERO);
 
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+            ui.ctx().request_repaint();
+            let mut force = FruchtermanReingold {
+                conf: FruchtermanReingoldConfiguration {
+                    scale: 400.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let time = ui.input(|i| i.time);
+            if time - self.time > 1. {
+                force.apply_many(&mut self.graph, 4);
+            }
+
             ui.label(format!("Scene rect: {:#?}", &mut self.scene));
+            ui.label(format!("Time: {:#?}, {:#?}", time, self.time));
             Scene::new()
                 .max_inner_size([350.0, 1000.0])
                 .zoom_range(0.1..=2.0)
@@ -107,6 +148,34 @@ impl eframe::App for PollinationViewer {
                     self.point += point_response.drag_delta();
 
                     painter.add(Shape::circle_filled(self.point, 50., Color32::DARK_RED));
+
+                    // Force-directed Graph
+
+                    for idx in self.graph.edge_indices() {
+                        let ((_, source), (_, target)) = self
+                            .graph
+                            .edge_endpoints(idx)
+                            .map(|(a, b)| {
+                                (
+                                    self.graph.node_weight(a).unwrap(),
+                                    self.graph.node_weight(b).unwrap(),
+                                )
+                            })
+                            .unwrap();
+                        painter.add(Shape::line_segment(
+                            [
+                                pos2(source.coords.column(0)[0], source.coords.column(0)[1]),
+                                pos2(target.coords.column(0)[0], target.coords.column(0)[1]),
+                            ],
+                            (5., Color32::BLUE),
+                        ));
+                    }
+
+                    for (idx, (name, pos)) in self.graph.node_weights().enumerate() {
+                        let x: f32 = pos.coords.column(0)[0];
+                        let y: f32 = pos.coords.column(0)[1];
+                        painter.add(Shape::circle_filled(pos2(x, y), 30., Color32::DARK_BLUE));
+                    }
                 });
         });
     }
