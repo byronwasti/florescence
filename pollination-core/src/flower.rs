@@ -1,29 +1,28 @@
 use crate::{
     constants,
-    engine::{Engine, EngineEvent, EngineRequest},
+    engine::{Engine, EngineEvent},
     message::{PollinationMessage, Topic},
-    nucleus::{Nucleus, NucleusError},
+    nucleus::Nucleus,
 };
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt, hash::Hash, time::Duration};
+use std::collections::HashMap;
 use thiserror::Error;
-use tokio::{
-    sync::mpsc::{Receiver, Sender},
-    time::{MissedTickBehavior, interval},
-};
+use tokio::time::{MissedTickBehavior, interval};
 use uuid::Uuid;
 
 pub struct Flower<E: Engine> {
+    #[allow(unused)]
     uuid: Uuid,
     engine: Option<E>,
     nuclei: HashMap<Topic, NucleiState<E::Addr>>,
     //engine_request_tx: Sender<EngineRequest<E::Addr>>,
     //engine_event_rx: Receiver<EngineEvent>,
+    #[allow(unused)]
     own_addr: E::Addr,
 }
 
 struct NucleiState<A> {
     nucleus: Nucleus<A>,
+    #[allow(unused)]
     seed_list: Vec<A>,
 }
 
@@ -35,8 +34,8 @@ where
         FlowerBuilder::new()
     }
 
-    async fn run(mut self) -> Result<(), FlowerError> {
-        let (mut engine_request_tx, mut engine_event_rx) = self
+    pub async fn run(mut self) -> Result<(), FlowerError> {
+        let (_engine_request_tx, mut engine_event_rx) = self
             .engine
             .take()
             .ok_or(FlowerError::MissingEngine)?
@@ -54,7 +53,7 @@ where
             tokio::select! {
                 _ = heartbeat.tick() => {
                     let mut msgs = vec![];
-                    for (topic, nuclei_state) in self.nuclei.iter_mut() {
+                    for (_topic, nuclei_state) in self.nuclei.iter_mut() {
                         nuclei_state.nucleus.bump();
                         if let Some(msg) = nuclei_state.nucleus.msg_heartbeat() {
                             msgs.push(msg);
@@ -68,7 +67,7 @@ where
 
                 _ = grim_reaper.tick() => {
                     let mut msgs = vec![];
-                    for (topic, nuclei_state) in self.nuclei.iter_mut() {
+                    for (_topic, nuclei_state) in self.nuclei.iter_mut() {
                         if nuclei_state.nucleus.reap_souls() {
                             if let Some(msg) = nuclei_state.nucleus.msg_heartbeat() {
                                 msgs.push(msg);
@@ -93,7 +92,10 @@ where
                             };
 
                             if let Some(msg) = return_msg  {
-                                tx.send(msg);
+                                let res = tx.send(msg).await;
+                                if let Err(err) = res {
+                                    error!("Error sending via mpsc: {err}");
+                                }
                             }
                         }
                     } else {
@@ -105,7 +107,7 @@ where
         }
     }
 
-    async fn send(&mut self, msg: PollinationMessage) {
+    async fn send(&mut self, _msg: PollinationMessage) {
         todo!()
     }
 }

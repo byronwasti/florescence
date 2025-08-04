@@ -1,10 +1,6 @@
-use crate::{
-    ds::WalkieTalkie,
-    message::PollinationMessage,
-    nucleus::{Nucleus, NucleusError, NucleusResponse},
-};
+use crate::message::PollinationMessage;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt, hash::Hash};
+use std::{fmt, future::Future, hash::Hash};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 const DEFAULT_CHANNEL_SIZE: usize = 10;
@@ -16,9 +12,11 @@ pub trait Engine: 'static {
     type Addr: Clone + Serialize + for<'de> Deserialize<'de> + Hash + fmt::Display + Send;
     type Error: std::error::Error + 'static;
 
-    async fn run_background(
+    fn run_background(
         self,
-    ) -> Result<(Sender<EngineRequest<Self::Addr>>, Receiver<EngineEvent>), Self::Error>;
+    ) -> impl Future<
+        Output = Result<(Sender<EngineRequest<Self::Addr>>, Receiver<EngineEvent>), Self::Error>,
+    > + Send;
 }
 
 pub struct EngineRequest<A> {

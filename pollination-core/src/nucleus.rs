@@ -4,7 +4,6 @@ use crate::{
     propagativity::Propagativity,
     reality_token::RealityToken,
 };
-use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt};
 use thiserror::Error;
@@ -27,6 +26,7 @@ impl<A> Nucleus<A>
 where
     A: Clone + for<'a> Deserialize<'a> + Serialize,
 {
+    #[allow(unused)]
     pub(crate) fn new(uuid: Uuid, topic: Topic, own_data: A) -> Self {
         let own_info = PeerInfo::new(uuid, own_data);
         let reality_token = RealityToken::new(uuid);
@@ -112,10 +112,12 @@ where
                         *self = self_clone;
                         Ok(())
                     } else {
-                        Err(PatchApplyError::RealitySkew(self_clone))
+                        Err(PatchApplyError::RealitySkew(Box::new(self_clone)))
                     }
                 }
-                Err(PatchApplyError::SelfRemoved) => Err(PatchApplyError::RealitySkew(self_clone)),
+                Err(PatchApplyError::SelfRemoved) => {
+                    Err(PatchApplyError::RealitySkew(Box::new(self_clone)))
+                }
                 err => err,
             }
         } else {
@@ -328,7 +330,7 @@ where
                 if peer_count > self.peer_count()
                     || peer_count == self.peer_count() && peer_rt > self.reality_token
                 {
-                    let old_core = self.swap_cores(core);
+                    let old_core = self.swap_cores(*core);
                     Ok(NucleusResponse::core_dump(self.msg_new_member(), old_core))
                 } else {
                     Ok(NucleusResponse::response(self.msg_reality_skew(&peer_ts)))
@@ -507,7 +509,7 @@ impl<A> From<PatchApplyError<A>> for NucleusError {
 #[derive(Error, Debug)]
 enum PatchApplyError<A> {
     #[error("Reality skew")]
-    RealitySkew(Nucleus<A>),
+    RealitySkew(Box<Nucleus<A>>),
 
     #[error("Update patch removed own ID")]
     SelfRemoved,

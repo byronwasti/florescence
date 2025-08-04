@@ -1,6 +1,5 @@
 use crate::{reality_token::RealityToken, serialization::*};
 use serde::{Deserialize, Serialize};
-use std::hash::Hash;
 use treeclocks::{EventTree, IdTree};
 use uuid::Uuid;
 

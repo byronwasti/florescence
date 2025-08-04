@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 #[cfg(feature = "json")]
 mod json {
@@ -45,4 +44,5 @@ mod bincode_ {
 }
 
 #[cfg(not(feature = "json"))]
+#[allow(unused_imports)]
 pub use bincode_::*;

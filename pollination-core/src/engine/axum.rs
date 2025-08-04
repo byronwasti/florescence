@@ -4,14 +4,8 @@ use crate::{
     serialization::{deserialize, serialize},
 };
 use axum::{
-    Router,
-    body::Bytes,
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::{get, post},
+    Router, body::Bytes, extract::State, http::StatusCode, response::IntoResponse, routing::post,
 };
-use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc};
 use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
@@ -63,7 +57,10 @@ impl Engine for AxumEngine {
 async fn handle_message(State(state): State<Arc<AppState>>, bytes: Bytes) -> impl IntoResponse {
     match handle_message_inner(&state.tx, bytes).await {
         Ok(msg) => (StatusCode::OK, msg),
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Bytes::new()),
+        Err(err) => {
+            error!("Error handling message inner: {err}");
+            (StatusCode::INTERNAL_SERVER_ERROR, Bytes::new())
+        }
     }
 }
 
@@ -76,7 +73,8 @@ async fn handle_message_inner(
     tx.send(EngineEvent {
         pollination_msg,
         tx: res_tx,
-    });
+    })
+    .await?;
 
     if let Some(res) = rx.recv().await {
         Ok(serialize(res)?.into())
@@ -97,7 +95,10 @@ async fn sender_task(mut rx: Receiver<EngineRequest<Url>>) {
 
                 match send_and_recv(addr, pollination_msg).await {
                     Ok(res) => {
-                        tx.send(res);
+                        let res = tx.send(res).await;
+                        if let Err(err) = res {
+                            error!("Error sending request: {err}");
+                        }
                     }
                     Err(err) => {
                         error!("Error sending request: {err}");
@@ -144,23 +145,11 @@ pub enum AxumEngineError {
 
     #[error("Reqwest error: {0}")]
     Reqwest(#[from] reqwest::Error),
+
+    #[error("Error sending via mpsc: {0}")]
+    SendError(#[from] tokio::sync::mpsc::error::SendError<EngineEvent>),
 }
 
 struct AppState {
     tx: Sender<EngineEvent>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct AxumMessage<A> {
-    return_addr: A,
-    pollination_msg: PollinationMessage,
-}
-
-impl<A> AxumMessage<A> {
-    fn new(return_addr: A, pollination_msg: PollinationMessage) -> Self {
-        Self {
-            return_addr,
-            pollination_msg,
-        }
-    }
 }

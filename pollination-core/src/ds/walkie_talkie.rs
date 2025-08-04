@@ -1,3 +1,4 @@
+#![allow(unused)]
 use tokio::sync::mpsc::{Receiver, Sender, channel, error::SendError};
 
 pub struct WalkieTalkie<T, U = T> {

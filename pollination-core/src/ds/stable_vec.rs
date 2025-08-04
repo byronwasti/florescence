@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 #[derive(Debug, Clone)]
 pub struct StableVec<T> {
     inner: Vec<Option<T>>,
