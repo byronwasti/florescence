@@ -13,19 +13,12 @@ use tokio::{
 };
 use uuid::Uuid;
 
-pub struct Flower {}
-
-impl Flower {
-    pub fn builder<E: Engine>() -> FlowerBuilder<E> {
-        FlowerBuilder::new()
-    }
-}
-
-struct FlowerCore<E: Engine> {
+pub struct Flower<E: Engine> {
     uuid: Uuid,
+    engine: Option<E>,
     nuclei: HashMap<Topic, NucleiState<E::Addr>>,
-    engine_request_tx: Sender<EngineRequest<E::Addr>>,
-    engine_event_rx: Receiver<EngineEvent>,
+    //engine_request_tx: Sender<EngineRequest<E::Addr>>,
+    //engine_event_rx: Receiver<EngineEvent>,
     own_addr: E::Addr,
 }
 
@@ -34,15 +27,23 @@ struct NucleiState<A> {
     seed_list: Vec<A>,
 }
 
-impl<E> FlowerCore<E>
+impl<E> Flower<E>
 where
     E: Engine,
 {
-    fn handle(&self) -> Flower {
-        Flower {}
+    pub fn builder() -> FlowerBuilder<E> {
+        FlowerBuilder::new()
     }
 
-    async fn run(mut self) {
+    async fn run(mut self) -> Result<(), FlowerError> {
+        let (mut engine_request_tx, mut engine_event_rx) = self
+            .engine
+            .take()
+            .ok_or(FlowerError::MissingEngine)?
+            .run_background()
+            .await
+            .map_err(|err| FlowerError::EngineError(Box::new(err)))?;
+
         let mut heartbeat = interval(constants::HEARTBEAT_TICK_TIME);
         heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -79,7 +80,7 @@ where
                     }
                 }
 
-                event  = self.engine_event_rx.recv() => {
+                event  = engine_event_rx.recv() => {
                     if let Some(EngineEvent { tx, pollination_msg: msg }) = event {
                         if let Some(nuclei_state) = self.nuclei.get_mut(&msg.topic()) {
                             // TODO: Handle cleanup of nucleus
@@ -97,7 +98,7 @@ where
                         }
                     } else {
                         error!("Engine shut down.");
-                        break
+                        break Ok(())
                     }
                 }
             }
@@ -149,32 +150,17 @@ where
         self
     }
 
-    pub async fn start(self) -> Result<Flower, FlowerError> {
+    pub fn build(self) -> Result<Flower<E>, FlowerError> {
         let uuid = self.uuid.unwrap_or(Uuid::new_v4());
         let nuclei = HashMap::new();
         let own_addr = self.own_addr.ok_or(FlowerError::MissingOwnAddr)?;
 
-        let (engine_request_tx, engine_event_rx) = self
-            .engine
-            .ok_or(FlowerError::MissingEngine)?
-            .run_background()
-            .await
-            .map_err(|err| FlowerError::EngineError(Box::new(err)))?;
-
-        let core: FlowerCore<E> = FlowerCore {
+        Ok(Flower {
             uuid,
             nuclei,
             own_addr,
-            engine_request_tx,
-            engine_event_rx,
-        };
-
-        let handle = core.handle();
-
-        //tokio::spawn(background_runner(core));
-        tokio::spawn(core.run());
-
-        Ok(handle)
+            engine: self.engine,
+        })
     }
 }
 

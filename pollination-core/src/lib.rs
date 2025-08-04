@@ -4,7 +4,7 @@ extern crate tracing;
 mod constants;
 mod ds;
 pub mod engine;
-mod flower;
+pub mod flower;
 mod handle;
 mod nucleus;
 mod peer_info;
