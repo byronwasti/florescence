@@ -1,4 +1,5 @@
 use petgraph::graph::{Graph, UnGraph};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -14,31 +15,26 @@ pub struct Node {
 pub fn graph() -> Graph<Node, ()> {
     let mut g = Graph::<Node, ()>::new();
 
-    let a = g.add_node(Node {
-        id: 0,
-        x: 12.,
-        y: 13.,
-    });
+    for i in 0..10 {
+        for j in 0..10 {
+            let _ = g.add_node(Node {
+                id: 10 * i + j,
+                x: i as f64 - 5.,
+                y: j as f64 - 5.,
+            });
+        }
+    }
 
-    let b = g.add_node(Node {
-        id: 1,
-        x: 1.,
-        y: 32.,
-    });
+    let mut rng = rand::thread_rng();
+    for _ in 0..100 {
+        let a = rng.gen_range(0..100);
+        let b = rng.gen_range(0..100);
+        if a == b {
+            continue;
+        }
 
-    let c = g.add_node(Node {
-        id: 2,
-        x: 5.,
-        y: 5.,
-    });
-
-    let d = g.add_node(Node {
-        id: 3,
-        x: 4.,
-        y: 100.,
-    });
-
-    g.extend_with_edges(&[(a, b), (b, c), (b, d)]);
+        g.extend_with_edges(&[(a, b)]);
+    }
 
     g
 }
@@ -87,18 +83,20 @@ pub fn fruchterman_reingold(g: &mut NodeGraph, config: &Config) {
         println!("\tTotal: ({}, {})", force.0, force.1);
 
         // Wall
-        if force.0 > 0. && node.x >= config.area.0 {
+        let hwidth = config.area.0 / 2.;
+        if force.0 > 0. && node.x >= hwidth {
             println!("Wall X > for {idx}");
             force.0 = 0.
-        } else if force.0 < 0. && node.x <= config.area.0 {
+        } else if force.0 < 0. && node.x <= -hwidth {
             println!("Wall X < for {idx}");
             force.0 = 0.
         }
 
-        if force.1 > 0. && node.y >= config.area.1 {
+        let hheight = config.area.1 / 2.;
+        if force.1 > 0. && node.y >= hheight {
             println!("Wall Y > for {idx}");
             force.1 = 0.
-        } else if force.1 < 0. && node.y <= config.area.1 {
+        } else if force.1 < 0. && node.y <= -hheight {
             println!("Wall Y < for {idx}");
             force.1 = 0.
         }
@@ -112,16 +110,18 @@ pub fn fruchterman_reingold(g: &mut NodeGraph, config: &Config) {
         node.x += force.0;
         node.y += force.1;
 
-        if node.x >= config.area.0 {
-            node.x = config.area.0
-        } else if node.x <= 0.0 {
-            node.x = 0.0
+        let hwidth = config.area.0 / 2.;
+        if node.x >= hwidth {
+            node.x = hwidth
+        } else if node.x <= -hwidth {
+            node.x = -hwidth
         }
 
-        if node.y >= config.area.1 {
-            node.y = config.area.1
-        } else if node.y <= 0.0 {
-            node.y = 0.0
+        let hheight = config.area.1 / 2.;
+        if node.y >= hheight {
+            node.y = hheight
+        } else if node.y <= -hheight {
+            node.y = -hheight
         }
 
         println!("Applying force {force:?} to {idx}");

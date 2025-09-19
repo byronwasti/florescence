@@ -37,6 +37,9 @@ pub struct PollinationViewer {
 
     node_color: egui::Color32,
     edge_color: egui::Color32,
+
+    cooling: bool,
+    cool_factor: f64,
 }
 
 impl Default for PollinationViewer {
@@ -75,6 +78,8 @@ impl Default for PollinationViewer {
             applied: 0.,
             node_color: egui::Color32::LIGHT_BLUE,
             edge_color: egui::Color32::LIGHT_RED,
+            cooling: false,
+            cool_factor: 0.2,
         }
     }
 }
@@ -126,7 +131,9 @@ impl eframe::App for PollinationViewer {
         egui::Window::new("Settings").show(ctx, |ui| {
             if ui.button("Step").clicked() {
                 self.time += 1.0;
-                self.config.temp = self.config.temp / 2.;
+                if self.cooling {
+                    self.config.temp = self.config.temp / 2.;
+                }
             }
 
             ui.add(egui::Slider::new(&mut self.config.d, 0.0..=5.0).text("d"));
@@ -139,6 +146,11 @@ impl eframe::App for PollinationViewer {
 
             ui.color_edit_button_srgba(&mut self.node_color);
             ui.color_edit_button_srgba(&mut self.edge_color);
+
+            ui.checkbox(&mut self.cooling, "Cooling");
+            if self.cooling {
+                ui.add(egui::Slider::new(&mut self.cool_factor, 0.0..=5.0).text("cool factor"));
+            }
         });
 
         /*
