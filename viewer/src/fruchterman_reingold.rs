@@ -13,10 +13,41 @@ pub struct Node {
 }
 
 pub fn graph() -> Graph<Node, ()> {
+    k_graph(5)
+}
+
+pub fn k_graph(k: usize) -> Graph<Node, ()> {
     let mut g = Graph::<Node, ()>::new();
 
-    for i in 0..10 {
-        for j in 0..10 {
+    let mut rng = rand::thread_rng();
+    for i in 0..k {
+        g.add_node(Node {
+            id: i,
+            x: rng.random(),
+            y: rng.random(),
+        });
+    }
+
+    for i in 0..k {
+        for j in 0..k {
+            if i == j {
+                continue
+            }
+
+            g.extend_with_edges(&[(i as u32, j as u32)]);
+        }
+    }
+
+    g
+}
+
+pub fn rand_graph() -> Graph<Node, ()> {
+    let mut g = Graph::<Node, ()>::new();
+
+    let sqrt_count = 4;
+
+    for i in 0..sqrt_count {
+        for j in 0..sqrt_count {
             let _ = g.add_node(Node {
                 id: 10 * i + j,
                 x: i as f64 - 5.,
@@ -26,14 +57,15 @@ pub fn graph() -> Graph<Node, ()> {
     }
 
     let mut rng = rand::thread_rng();
-    for _ in 0..100 {
-        let a = rng.gen_range(0..100);
-        let b = rng.gen_range(0..100);
+    let count = sqrt_count.pow(2);
+    for _ in 0..count {
+        let a = rng.gen_range(0..count);
+        let b = rng.gen_range(0..count);
         if a == b {
             continue;
         }
 
-        g.extend_with_edges(&[(a, b)]);
+        g.extend_with_edges(&[(a as u32, b as u32)]);
     }
 
     g
@@ -67,16 +99,20 @@ pub fn fruchterman_reingold(g: &mut NodeGraph, config: &Config) {
         for neighbor in g.neighbors((idx as u32).into()) {
             let neighbor = g.node_weight(neighbor).unwrap();
 
-            let fax = force_attraction(k, (node.x - neighbor.x).abs()).clamp(0., config.temp);
-            let fay = force_attraction(k, (node.y - neighbor.y).abs()).clamp(0., config.temp);
+            //let fax = force_attraction(k, (node.x - neighbor.x).abs()).clamp(-config.temp., config.temp);
+            //let fay = force_attraction(k, (node.y - neighbor.y).abs()).clamp(-config.temp., config.temp);
+            let fax = force_attraction(k, neighbor.x - node.x).clamp(-config.temp, config.temp);
+            let fay = force_attraction(k, neighbor.y - node.y).clamp(-config.temp, config.temp);
 
             println!("\tComponents: +({fax}, {fay})");
             force = (force.0 + fax, force.1 + fay);
         }
 
         for (jdx, other_node) in g.node_weights().enumerate() {
-            let frx = force_repulsion(k, (node.x - other_node.x).abs()).clamp(0., config.temp);
-            let fry = force_repulsion(k, (node.y - other_node.y).abs()).clamp(0., config.temp);
+            //let frx = force_repulsion(k, (node.x - other_node.x).abs()).clamp(-config.temp., config.temp);
+            //let fry = force_repulsion(k, (node.y - other_node.y).abs()).clamp(-config.temp., config.temp);
+            let frx = force_repulsion(k, other_node.x - node.x).clamp(-config.temp, config.temp);
+            let fry = force_repulsion(k, other_node.y - node.y).clamp(-config.temp, config.temp);
             println!("\tComponents: -({frx}, {fry})");
             force = (force.0 + frx, force.1 + fry);
         }

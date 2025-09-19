@@ -132,7 +132,7 @@ impl eframe::App for PollinationViewer {
             if ui.button("Step").clicked() {
                 self.time += 1.0;
                 if self.cooling {
-                    self.config.temp = self.config.temp / 2.;
+                    self.config.temp = self.config.temp / self.cool_factor;
                 }
             }
 
@@ -189,10 +189,15 @@ impl eframe::App for PollinationViewer {
             //ui.label(format!("Time: {:#?}, {:#?}", time, self.time));
             Scene::new()
                 .max_inner_size([350.0, 1000.0])
-                .zoom_range(0.1..=2.0)
+                .zoom_range(0.1..=10.0)
                 .show(ui, &mut self.scene, |ui| {
                     let response = ui.allocate_response(ui.available_size(), Sense::hover());
                     let painter = ui.painter().with_clip_rect(ui.clip_rect());
+
+                    painter.add(Shape::rect_stroke(Rect::from_two_pos(
+                        pos2(-self.config.area.0 as f32 / 2., -self.config.area.1 as f32 / 2.),
+                        pos2(self.config.area.0 as f32 / 2., self.config.area.1 as f32 / 2.),
+                    ), 0., (3., self.edge_color), egui::StrokeKind::Outside));
 
                     /*
                     painter.add(Shape::circle_filled(
