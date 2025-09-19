@@ -3,16 +3,20 @@ use crate::{
     engine::{Engine, EngineEvent},
     message::{PollinationMessage, Topic},
     nucleus::Nucleus,
+    clock::Clock,
+    router::Router,
 };
 use std::collections::HashMap;
 use thiserror::Error;
 use tokio::time::{MissedTickBehavior, interval};
 use uuid::Uuid;
 
-pub struct Flower<E: Engine> {
+pub struct Flower<E: Engine, C, R> {
     #[allow(unused)]
     uuid: Uuid,
     engine: Option<E>,
+    clock: C,
+    router: R,
     nuclei: HashMap<Topic, NucleiState<E::Addr>>,
     //engine_request_tx: Sender<EngineRequest<E::Addr>>,
     //engine_event_rx: Receiver<EngineEvent>,
@@ -26,11 +30,13 @@ struct NucleiState<A> {
     seed_list: Vec<A>,
 }
 
-impl<E> Flower<E>
+impl<E, C, R> Flower<E, C, R>
 where
     E: Engine,
+    C: Clock,
+    R: Router,
 {
-    pub fn builder() -> FlowerBuilder<E> {
+    pub fn builder() -> FlowerBuilder<E, C, R> {
         FlowerBuilder::new()
     }
 
@@ -112,20 +118,26 @@ where
     }
 }
 
-pub struct FlowerBuilder<E: Engine> {
+pub struct FlowerBuilder<E: Engine, C, R> {
     engine: Option<E>,
+    clock: Option<C>,
+    router: Option<R>,
     uuid: Option<Uuid>,
     own_addr: Option<E::Addr>,
     seed_list: Vec<E::Addr>,
 }
 
-impl<E> FlowerBuilder<E>
+impl<E, C, R> FlowerBuilder<E, C, R>
 where
     E: Engine,
+    C: Clock,
+    R: Router,
 {
     pub fn new() -> Self {
         Self {
             engine: None,
+            clock: None,
+            router: None,
             uuid: None,
             own_addr: None,
             seed_list: vec![],
@@ -134,6 +146,16 @@ where
 
     pub fn engine(mut self, engine: E) -> Self {
         self.engine = Some(engine);
+        self
+    }
+
+    pub fn clock(mut self, clock: C) -> Self {
+        self.clock = Some(clock);
+        self
+    }
+
+    pub fn router(mut self, router: R) -> Self {
+        self.router = Some(router);
         self
     }
 
@@ -152,7 +174,7 @@ where
         self
     }
 
-    pub fn build(self) -> Result<Flower<E>, FlowerError> {
+    pub fn build(self) -> Result<Flower<E, C, R>, FlowerError> {
         let uuid = self.uuid.unwrap_or(Uuid::new_v4());
         let nuclei = HashMap::new();
         let own_addr = self.own_addr.ok_or(FlowerError::MissingOwnAddr)?;
@@ -162,6 +184,8 @@ where
             nuclei,
             own_addr,
             engine: self.engine,
+            clock: self.clock.unwrap_or_else(|| todo!()),
+            router: self.router.unwrap_or_else(|| todo!()),
         })
     }
 }

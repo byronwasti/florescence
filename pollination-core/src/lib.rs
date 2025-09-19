@@ -10,6 +10,8 @@ mod nucleus;
 mod peer_info;
 mod propagativity;
 mod serialization;
+mod clock;
+mod router;
 
 pub mod connection;
 pub mod message;
