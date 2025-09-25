@@ -2,18 +2,20 @@ use petgraph::graph::{Graph, UnGraph};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use egui::{Vec2, Pos2, pos2, vec2};
 
 pub type NodeGraph = Graph<Node, ()>;
 
 #[derive(Debug, Default)]
 pub struct Node {
     pub id: usize,
-    pub x: f64,
-    pub y: f64,
+    pub pos: Pos2
 }
+
 
 pub fn graph() -> Graph<Node, ()> {
     k_graph(5)
+    //rand_graph()
 }
 
 pub fn k_graph(k: usize) -> Graph<Node, ()> {
@@ -23,8 +25,7 @@ pub fn k_graph(k: usize) -> Graph<Node, ()> {
     for i in 0..k {
         g.add_node(Node {
             id: i,
-            x: rng.random(),
-            y: rng.random(),
+            pos: pos2(rng.random(), rng.random()),
         });
     }
 
@@ -50,8 +51,7 @@ pub fn rand_graph() -> Graph<Node, ()> {
         for j in 0..sqrt_count {
             let _ = g.add_node(Node {
                 id: 10 * i + j,
-                x: i as f64 - 5.,
-                y: j as f64 - 5.,
+                pos: pos2(i as f32 - 5., j as f32 - 5.),
             });
         }
     }
@@ -73,59 +73,59 @@ pub fn rand_graph() -> Graph<Node, ()> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
-    pub area: (f64, f64),
-    pub d: f64,
-    pub c: f64,
-    pub temp: f64,
+    pub area: (f32, f32),
+    pub c: f32,
+    pub temp: f32,
 }
 
 impl Config {
-    pub fn k(&self, count: f64) -> f64 {
+    pub fn k(&self, count: f32) -> f32 {
         let area = (self.area.0 * self.area.1);
         k(self.c, area, count)
     }
 }
 
 pub fn fruchterman_reingold(g: &mut NodeGraph, config: &Config) {
-    let count = g.node_count() as f64;
+    let count = g.node_count() as f32;
     let k = config.k(count);
 
     let mut net_forces = vec![];
 
     for (idx, node) in g.node_weights().enumerate() {
-        let mut force = (0., 0.);
+        let mut force = vec2(0., 0.);
 
         println!("Force for {idx}:");
         for neighbor in g.neighbors((idx as u32).into()) {
             let neighbor = g.node_weight(neighbor).unwrap();
 
-            //let fax = force_attraction(k, (node.x - neighbor.x).abs()).clamp(-config.temp., config.temp);
-            //let fay = force_attraction(k, (node.y - neighbor.y).abs()).clamp(-config.temp., config.temp);
-            let fax = force_attraction(k, neighbor.x - node.x).clamp(-config.temp, config.temp);
-            let fay = force_attraction(k, neighbor.y - node.y).clamp(-config.temp, config.temp);
+            let d = node.pos.distance(neighbor.pos);
+            let v = (neighbor.pos.to_vec2() - node.pos.to_vec2()).normalized();
 
-            println!("\tComponents: +({fax}, {fay})");
-            force = (force.0 + fax, force.1 + fay);
+            let fa = force_attraction(k, d).clamp(0., config.temp);
+
+            println!("\tComponents: +{fa}");
+            force += (v * fa);
         }
 
-        for (jdx, other_node) in g.node_weights().enumerate() {
-            //let frx = force_repulsion(k, (node.x - other_node.x).abs()).clamp(-config.temp., config.temp);
-            //let fry = force_repulsion(k, (node.y - other_node.y).abs()).clamp(-config.temp., config.temp);
-            let frx = force_repulsion(k, other_node.x - node.x).clamp(-config.temp, config.temp);
-            let fry = force_repulsion(k, other_node.y - node.y).clamp(-config.temp, config.temp);
-            println!("\tComponents: -({frx}, {fry})");
-            force = (force.0 + frx, force.1 + fry);
+        for (jdx, other) in g.node_weights().enumerate() {
+            let d = node.pos.distance(other.pos);
+            let v = (other.pos.to_vec2() - node.pos.to_vec2()).normalized();
+
+            let fr = force_repulsion(k, d).clamp(-config.temp, 0.);
+            println!("\tComponents: -{fr}");
+            force += (v * fr);
         }
-        println!("\tTotal: ({}, {})", force.0, force.1);
+        println!("\tTotal: {force}");
 
         // Wall
+        /*
         let hwidth = config.area.0 / 2.;
-        if force.0 > 0. && node.x >= hwidth {
+        if force.x > 0. && node.pos.x >= hwidth {
             println!("Wall X > for {idx}");
-            force.0 = 0.
-        } else if force.0 < 0. && node.x <= -hwidth {
+            force.x = 0.
+        } else if force.x < 0. && node.pos.x <= -hwidth {
             println!("Wall X < for {idx}");
-            force.0 = 0.
+            force.y = 0.
         }
 
         let hheight = config.area.1 / 2.;
@@ -136,47 +136,38 @@ pub fn fruchterman_reingold(g: &mut NodeGraph, config: &Config) {
             println!("Wall Y < for {idx}");
             force.1 = 0.
         }
+        */
 
         net_forces.push(force);
     }
 
     for (idx, node) in g.node_weights_mut().enumerate() {
         let force = net_forces[idx];
+        println!("Applying force {force:?} to {idx}");
 
-        node.x += force.0;
-        node.y += force.1;
+        node.pos += force;
 
         let hwidth = config.area.0 / 2.;
-        if node.x >= hwidth {
-            node.x = hwidth
-        } else if node.x <= -hwidth {
-            node.x = -hwidth
-        }
-
         let hheight = config.area.1 / 2.;
-        if node.y >= hheight {
-            node.y = hheight
-        } else if node.y <= -hheight {
-            node.y = -hheight
-        }
 
-        println!("Applying force {force:?} to {idx}");
+        let pos = node.pos.min(pos2(hwidth, hheight)).max(pos2(-hwidth, -hheight));
+        node.pos = pos;
     }
 
     println!("Positions");
     for node in g.node_weights() {
-        println!("\t{}: ({}, {})", node.id, node.x, node.y);
+        println!("\t{}: {}", node.id, node.pos);
     }
 }
 
-fn k(c: f64, area: f64, count: f64) -> f64 {
+fn k(c: f32, area: f32, count: f32) -> f32 {
     c * (area / count).sqrt()
 }
 
-fn force_attraction(k: f64, d: f64) -> f64 {
+fn force_attraction(k: f32, d: f32) -> f32 {
     d.powi(2) / k
 }
 
-fn force_repulsion(k: f64, d: f64) -> f64 {
+fn force_repulsion(k: f32, d: f32) -> f32 {
     -k.powi(2) / d
 }
