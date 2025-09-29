@@ -14,8 +14,8 @@ pub struct Node {
 
 
 pub fn graph() -> Graph<Node, ()> {
-    k_graph(5)
-    //rand_graph()
+    //k_graph(5)
+    rand_graph()
 }
 
 pub fn k_graph(k: usize) -> Graph<Node, ()> {

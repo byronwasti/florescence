@@ -182,6 +182,8 @@ impl eframe::App for PollinationViewer {
             .outer_margin(egui::Margin::ZERO);
 
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+
+            /*
             let id = egui::Id::new("animation");
             if self.config.temp > 1. {
                 self.config.temp = ui.ctx().animate_bool(id, false) * self.set_temp;
@@ -190,14 +192,13 @@ impl eframe::App for PollinationViewer {
             } else {
                 _ = ui.ctx().animate_bool(id, true);
             }
+            */
 
-            /*
             if self.time > self.applied {
                 //ui.ctx().request_repaint();
                 self.applied = self.time;
                 fr::fruchterman_reingold(&mut self.graph, &self.config);
             }
-            */
 
             ui.label(format!("Scene rect: {:#?}", &mut self.scene));
             ui.label(format!(
