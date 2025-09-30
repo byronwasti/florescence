@@ -64,7 +64,7 @@ impl Default for PollinationViewer {
 
         let graph = fr::graph();
         let config = fr::Config {
-            area: (1000., 1000.),
+            area: (10000., 10000.),
             c: 0.03,
             temp: 25.,
         };
