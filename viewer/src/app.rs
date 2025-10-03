@@ -145,7 +145,7 @@ impl eframe::App for PollinationViewer {
             }
 
             ui.add(egui::Slider::new(&mut self.config.c, 0.0..=1.0).text("c"));
-            ui.add(egui::Slider::new(&mut self.set_temp, 0.0..=100.0).text(format!("temp ({})", self.config.temp)));
+            ui.add(egui::Slider::new(&mut self.set_temp, 0.0..=10_000.0).text(format!("temp ({})", self.config.temp)));
 
             if ui.button("Reset").clicked() {
                 self.graph = fr::graph();
@@ -183,22 +183,22 @@ impl eframe::App for PollinationViewer {
 
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
 
-            /*
             let id = egui::Id::new("animation");
             if self.config.temp > 1. {
-                self.config.temp = ui.ctx().animate_bool(id, false) * self.set_temp;
-                //ui.ctx().request_repaint();
+                //self.config.temp = ui.ctx().animate_bool(id, false) * self.set_temp;
+                ui.ctx().request_repaint();
                 fr::fruchterman_reingold(&mut self.graph, &self.config);
             } else {
                 _ = ui.ctx().animate_bool(id, true);
             }
-            */
 
+            /*
             if self.time > self.applied {
                 //ui.ctx().request_repaint();
                 self.applied = self.time;
                 fr::fruchterman_reingold(&mut self.graph, &self.config);
             }
+            */
 
             ui.label(format!("Scene rect: {:#?}", &mut self.scene));
             ui.label(format!(
@@ -213,12 +213,13 @@ impl eframe::App for PollinationViewer {
                     let response = ui.allocate_response(ui.available_size(), Sense::hover());
                     let painter = ui.painter().with_clip_rect(ui.clip_rect());
 
+                    // Draw the Border
                     painter.add(Shape::rect_stroke(Rect::from_two_pos(
                         pos2(-self.config.area.0 as f32 / 2., -self.config.area.1 as f32 / 2.),
                         pos2(self.config.area.0 as f32 / 2., self.config.area.1 as f32 / 2.),
                     ), 0., (3., self.border_color), egui::StrokeKind::Outside));
 
-                    /*
+                    /* Random Garbage
                     painter.add(Shape::circle_filled(
                         Pos2::new(0., 0.),
                         50.,
@@ -233,14 +234,32 @@ impl eframe::App for PollinationViewer {
                     painter.add(Shape::circle_filled(self.point, 50., Color32::DARK_RED));
                     */
 
-                    for (idx, node) in self.graph.node_weights().enumerate() {
-                        for neighbor in self.graph.neighbors((idx as u32).into()) {
+                    for (i, node) in self.graph.node_weights().enumerate() {
+                        for (j, neighbor) in self.graph.neighbors((i as u32).into()).enumerate() {
                             let neighbor = self.graph.node_weight(neighbor).unwrap();
+
+                            /*
+                            ui.ctx().animate_value_with_time(egui::Id::new(format!("edge-{}.{}", i, j)),
+                                
+                                )
+                            */
 
                             painter.add(Shape::line_segment(
                                 [
-                                    node.pos,
-                                    neighbor.pos,
+                                    animate_pos(
+                                        ui,
+                                        egui::Id::new(format!("edge-a-{i}-{j}-x")),
+                                        egui::Id::new(format!("edge-a-{i}-{j}-y")),
+                                        node.pos,
+                                        ui.input(|i| i.time as f32),
+                                    ),
+                                    animate_pos(
+                                        ui,
+                                        egui::Id::new(format!("edge-b-{i}-{j}-x")),
+                                        egui::Id::new(format!("edge-b-{i}-{j}-y")),
+                                        neighbor.pos,
+                                        ui.input(|i| i.time as f32),
+                                    )
                                 ],
                                 (3., self.edge_color),
                             ));
@@ -252,7 +271,13 @@ impl eframe::App for PollinationViewer {
                         let point_response = ui.interact(point_rect, point_id, Sense::drag());
                         node.pos += point_response.drag_delta();
                         painter.add(Shape::circle_filled(
-                            node.pos,
+                            animate_pos(
+                                ui,
+                                egui::Id::new(format!("node-{idx}-x")),
+                                egui::Id::new(format!("node-{idx}-y")),
+                                node.pos,
+                                ui.input(|i| i.time as f32),
+                            ),
                             10.,
                             self.node_color,
                         ));
@@ -260,6 +285,21 @@ impl eframe::App for PollinationViewer {
                 });
         });
     }
+}
+
+fn animate_pos(ui: &mut egui::Ui, id0: egui::Id, id1: egui::Id, pos: Pos2, time: f32) -> Pos2 {
+    let x = ui.ctx().animate_value_with_time(
+        id0,
+        pos.x,
+        time,
+    );
+    let y = ui.ctx().animate_value_with_time(
+        id1,
+        pos.y,
+        time,
+    );
+
+    pos2(x, y)
 }
 
 fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {

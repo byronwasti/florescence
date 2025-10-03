@@ -14,8 +14,8 @@ pub struct Node {
 
 
 pub fn graph() -> Graph<Node, ()> {
-    //k_graph(5)
-    rand_graph()
+    k_graph(8)
+    //rand_graph()
 }
 
 pub fn k_graph(k: usize) -> Graph<Node, ()> {
@@ -45,7 +45,7 @@ pub fn k_graph(k: usize) -> Graph<Node, ()> {
 pub fn rand_graph() -> Graph<Node, ()> {
     let mut g = Graph::<Node, ()>::new();
 
-    let sqrt_count = 4;
+    let sqrt_count = 3;
 
     for i in 0..sqrt_count {
         for j in 0..sqrt_count {
@@ -57,7 +57,7 @@ pub fn rand_graph() -> Graph<Node, ()> {
     }
 
     let mut rng = rand::thread_rng();
-    let count = sqrt_count.pow(2);
+    let count = sqrt_count.pow(4);
     for _ in 0..count {
         let a = rng.gen_range(0..count);
         let b = rng.gen_range(0..count);
