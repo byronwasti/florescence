@@ -1,21 +1,24 @@
-use petgraph::graph::{Graph, UnGraph};
+use egui::{Pos2, Vec2, pos2, vec2};
+use fjadra::{Center, Link, ManyBody, Node as FNode, SimulationBuilder};
+use petgraph::{
+    graph::{Graph, UnGraph},
+    visit::EdgeRef,
+};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use egui::{Vec2, Pos2, pos2, vec2};
 
 pub type NodeGraph = Graph<Node, ()>;
 
 #[derive(Debug, Default)]
 pub struct Node {
     pub id: usize,
-    pub pos: Pos2
+    pub pos: Pos2,
 }
 
-
 pub fn graph() -> Graph<Node, ()> {
-    k_graph(8)
-    //rand_graph()
+    //k_graph(8)
+    rand_graph()
 }
 
 pub fn k_graph(k: usize) -> Graph<Node, ()> {
@@ -32,7 +35,7 @@ pub fn k_graph(k: usize) -> Graph<Node, ()> {
     for i in 0..k {
         for j in 0..k {
             if i == j {
-                continue
+                continue;
             }
 
             g.extend_with_edges(&[(i as u32, j as u32)]);
@@ -82,6 +85,32 @@ impl Config {
     pub fn k(&self, count: f32) -> f32 {
         let area = (self.area.0 * self.area.1);
         k(self.c, area, count)
+    }
+}
+
+pub fn fjadra(g: &mut NodeGraph) {
+    let nodes = g.node_weights().map(|_| FNode::default());
+    let edges = g
+        .edge_references()
+        .clone()
+        .into_iter()
+        .map(|e| (e.source().index(), e.target().index()));
+
+    let mut sim = SimulationBuilder::default()
+        //.with_velocity_decay(0.1)
+        .build(nodes)
+        .add_force(
+            "link",
+            //Link::new(edges).strength(1.0).distance(60.0),
+            Link::new(edges),
+        )
+        .add_force("charge", ManyBody::new())
+        .add_force("center", Center::new());
+
+    let positions = sim.iter().last().expect("Sim should always return");
+
+    for (idx, node) in g.node_weights_mut().enumerate() {
+        node.pos = pos2(positions[idx][0] as f32, positions[idx][1] as f32)
     }
 }
 
@@ -150,7 +179,10 @@ pub fn fruchterman_reingold(g: &mut NodeGraph, config: &Config) {
         let hwidth = config.area.0 / 2.;
         let hheight = config.area.1 / 2.;
 
-        let pos = node.pos.min(pos2(hwidth, hheight)).max(pos2(-hwidth, -hheight));
+        let pos = node
+            .pos
+            .min(pos2(hwidth, hheight))
+            .max(pos2(-hwidth, -hheight));
         node.pos = pos;
     }
 
