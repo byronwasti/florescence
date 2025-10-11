@@ -7,6 +7,7 @@ use fdg::{
     petgraph::Graph,
     simple::Center,
 };
+use fjadra::force::SimulationBuilder;
 use std::f32::consts::TAU;
 
 #[derive(serde::Deserialize, serde::Serialize)]

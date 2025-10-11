@@ -27,6 +27,7 @@ fdg = { git = "https://github.com/grantshandy/fdg" }
 serde = { version = "1.0.219", features = ["derive"] }
 petgraph = "0.8.2"
 rand = "0.9.2"
+fjadra = "0.2.1"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
