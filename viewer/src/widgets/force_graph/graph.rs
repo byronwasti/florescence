@@ -1,5 +1,5 @@
 use egui::{Pos2, Vec2, pos2, vec2};
-use fjadra::{Center, Link, ManyBody, Node as FNode, SimulationBuilder};
+use fjadra::{Center, Link, ManyBody, Node as FNode, PositionX, PositionY, SimulationBuilder};
 use petgraph::{
     dot::{Config, Dot},
     graph::{Graph, UnGraph},
@@ -17,12 +17,12 @@ pub struct Node {
 
 pub struct ForceGraph {
     inner: Graph<Node, ()>,
-    state: State,
+    pub(crate) state: State,
 }
 
-struct State {
-    first: bool,
-    interact: bool,
+pub(crate) struct State {
+    pub first: bool,
+    pub interact: bool,
 }
 
 impl ForceGraph {
@@ -100,19 +100,21 @@ impl ForceGraph {
     }
 
     pub fn run_force_simulation(&mut self, config: &super::ForceGraphConfig, fixed: &[usize]) {
-        if !self.state.first {
+        if !self.state.first && !self.state.interact {
             return;
         }
         println!("Running force sim");
-        self.state.first = false;
 
         let g = &mut self.inner;
         let nodes = g.node_weights().enumerate().map(|(idx, n)| {
             if fixed.contains(&idx) {
                 FNode::default().fixed_position(n.pos.x as f64, n.pos.y as f64)
             } else {
-                FNode::default()
-                //FNode::default().position(n.pos.x as f64, n.pos.y as f64)
+                if self.state.first {
+                    FNode::default()
+                } else {
+                    FNode::default().position(n.pos.x as f64, n.pos.y as f64)
+                }
             }
         });
         let edges = g
@@ -122,8 +124,10 @@ impl ForceGraph {
             .map(|e| (e.source().index(), e.target().index()));
 
         let mut sim = SimulationBuilder::default();
-        if config.velocity_decay_enabled {
-            sim = sim.with_velocity_decay(config.velocity_decay)
+
+        if !self.state.first {
+            sim = sim.with_alpha(0.1);
+            sim = sim.with_velocity_decay(config.velocity_decay);
         }
 
         let mut link = Link::new(edges);
@@ -138,6 +142,8 @@ impl ForceGraph {
             .build(nodes)
             .add_force("link", link)
             .add_force("charge", ManyBody::new())
+            //.add_force("positionx", PositionY::new().strength(0.001))
+            //.add_force("positiony", PositionX::new().strength(0.1))
             .add_force("center", Center::new());
 
         let positions = sim.iter().last().expect("Sim should always return");
@@ -145,5 +151,7 @@ impl ForceGraph {
         for (idx, node) in g.node_weights_mut().enumerate() {
             node.pos = pos2(positions[idx][0] as f32, positions[idx][1] as f32)
         }
+
+        self.state.first = false;
     }
 }

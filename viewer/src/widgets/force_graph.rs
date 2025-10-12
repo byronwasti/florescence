@@ -43,6 +43,8 @@ impl<'a> ForceGraphWidget<'a> {
     ) -> (Vec<Pos2>, Vec<usize>) {
         let mut out = vec![];
         let mut fixed = vec![];
+
+        let mut interact = false;
         for (idx, node) in self.graph.inner_mut().node_weights_mut().enumerate() {
             let point_rect = Rect::from_center_size(node.pos, vec2(20., 20.));
             let point_id = response.id.with(idx);
@@ -52,6 +54,7 @@ impl<'a> ForceGraphWidget<'a> {
             let pos = if point_response.dragged() {
                 println!("Fixed point: {idx}");
                 fixed.push(idx);
+                interact = true;
                 node.pos
             } else {
                 if point_response.drag_stopped() {
@@ -69,6 +72,8 @@ impl<'a> ForceGraphWidget<'a> {
 
             out.push(pos)
         }
+
+        self.graph.state.interact = interact;
 
         (out, fixed)
     }
