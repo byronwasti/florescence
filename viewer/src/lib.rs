@@ -1,6 +1,6 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
 mod app;
-mod fruchterman_reingold;
+mod widgets;
 
 pub use app::PollinationViewer;

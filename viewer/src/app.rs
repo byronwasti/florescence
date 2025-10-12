@@ -1,11 +1,6 @@
-use crate::fruchterman_reingold as fr;
-use egui::{Color32, Frame, Pos2, Rect, Painter, Scene, Sense, Shape, Stroke, Ui, Vec2, emath, pos2, vec2};
-use fdg::{
-    Force, ForceGraph,
-    fruchterman_reingold::{FruchtermanReingold, FruchtermanReingoldConfiguration},
-    nalgebra::Rotation2,
-    petgraph::Graph,
-    simple::Center,
+use crate::widgets::{ForceGraph, ForceGraphConfig, ForceGraphSettingsWidget, ForceGraphWidget};
+use egui::{
+    Color32, Frame, Painter, Pos2, Rect, Scene, Sense, Shape, Stroke, Ui, Vec2, emath, pos2, vec2,
 };
 use fjadra::force::SimulationBuilder;
 use std::f32::consts::TAU;
@@ -13,63 +8,25 @@ use std::f32::consts::TAU;
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct PollinationViewer {
-    label: String,
-
-    #[serde(skip)]
-    value: f32,
-
-    #[serde(skip)]
-    point: Pos2,
-
     #[serde(skip)]
     scene: Rect,
 
     #[serde(skip)]
-    graph: fr::NodeGraph,
+    graph: ForceGraph,
 
-    #[serde(skip)]
-    config: fr::Config,
+    config: ForceGraphConfig,
 
     #[serde(skip)]
     time: f32,
-
-    #[serde(skip)]
-    applied: f32,
-
-    node_color: egui::Color32,
-    edge_color: egui::Color32,
-
-    cooling: bool,
-    cool_factor: f32,
-
-    set_temp: f32,
 }
 
 impl Default for PollinationViewer {
     fn default() -> Self {
-        let mut graph = fr::graph();
-        let config = fr::Config {
-            area: (10000., 10000.),
-            c: 0.03,
-            temp: 25.,
-        };
-
-        fr::fjadra(&mut graph);
-
         Self {
-            label: "Hello World!".to_owned(),
-            value: 2.7,
-            point: Pos2::new(50., 100.),
             scene: Rect::ZERO,
-            graph,
-            set_temp: config.temp,
-            config,
+            graph: ForceGraph::random(),
+            config: ForceGraphConfig::default(),
             time: 0.,
-            applied: 0.,
-            node_color: egui::Color32::LIGHT_BLUE,
-            edge_color: egui::Color32::LIGHT_RED,
-            cooling: false,
-            cool_factor: 1.1,
         }
     }
 }
@@ -88,40 +45,29 @@ impl PollinationViewer {
             Default::default()
         }
     }
-
-    pub fn reset_temp(&mut self) {
-        self.config.temp = self.set_temp;
-    }
 }
 
 impl PollinationViewer {
     fn draw_settings(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::Window::new("Settings").show(ctx, |ui| {
+            /*
             if ui.button("Step").clicked() {
                 self.time += 1.0;
-                if self.cooling {
-                    self.config.temp = self.config.temp / self.cool_factor;
-                }
             }
 
             ui.add(egui::Slider::new(&mut self.config.c, 0.0..=1.0).text("c"));
-            ui.add(
-                egui::Slider::new(&mut self.set_temp, 0.0..=10_000.0)
-                    .text(format!("temp ({})", self.config.temp)),
-            );
 
             if ui.button("Reset").clicked() {
-                self.graph = fr::graph();
-                self.config.temp = self.set_temp;
+                self.graph = ForceGraph::random();
             }
+            */
 
-            ui.color_edit_button_srgba(&mut self.node_color);
-            ui.color_edit_button_srgba(&mut self.edge_color);
-
-            ui.checkbox(&mut self.cooling, "Cooling");
-            if self.cooling {
-                ui.add(egui::Slider::new(&mut self.cool_factor, 0.0..=5.0).text("cool factor"));
-            }
+            //ui.color_edit_button_srgba(&mut self.config.node_color);
+            //ui.color_edit_button_srgba(&mut self.config.edge_color);
+            ui.add(ForceGraphSettingsWidget::new(
+                &mut self.graph,
+                &mut self.config,
+            ));
         });
     }
 
@@ -157,7 +103,7 @@ impl PollinationViewer {
                 .max_inner_size([350.0, 1000.0])
                 .zoom_range(0.1..=10.0)
                 .show(ui, &mut rect, |ui| {
-                    self.draw_graph(ui);
+                    ui.add(ForceGraphWidget::new(&mut self.graph, &mut self.config))
                 });
             self.scene = rect;
         });
@@ -165,68 +111,12 @@ impl PollinationViewer {
 
     fn draw_scene_stats(&self, ui: &mut Ui) {
         ui.label(format!("Scene rect: {:#?}", &self.scene));
+        /*
         ui.label(format!(
             "k: {:#?}",
             &self.config.k(self.graph.node_count() as f32)
         ));
-    }
-
-    fn draw_graph(&self, ui: &mut Ui) {
-        let response = ui.allocate_response(ui.available_size(), Sense::hover());
-        let painter = ui.painter().with_clip_rect(ui.clip_rect());
-        self.draw_edges(ui, &painter);
-        self.draw_nodes(ui, &painter);
-    }
-
-    fn draw_edges(&self, ui: &mut Ui, painter: &Painter) {
-        for (i, node) in self.graph.node_weights().enumerate() {
-            for (j, neighbor) in self.graph.neighbors((i as u32).into()).enumerate() {
-                let neighbor = self.graph.node_weight(neighbor).unwrap();
-
-                painter.add(Shape::line_segment(
-                    [
-                        animate_pos(
-                            ui,
-                            egui::Id::new(format!("edge-a-{i}-{j}-x")),
-                            egui::Id::new(format!("edge-a-{i}-{j}-y")),
-                            node.pos,
-                            ui.input(|i| i.time as f32),
-                        ),
-                        animate_pos(
-                            ui,
-                            egui::Id::new(format!("edge-b-{i}-{j}-x")),
-                            egui::Id::new(format!("edge-b-{i}-{j}-y")),
-                            neighbor.pos,
-                            ui.input(|i| i.time as f32),
-                        ),
-                    ],
-                    (3., self.edge_color),
-                ));
-            }
-        }
-    }
-
-    fn draw_nodes(&self, ui: &mut Ui, painter: &Painter) {
-        //for (idx, node) in self.graph.node_weights_mut().enumerate() {
-        for (idx, node) in self.graph.node_weights().enumerate() {
-            /*
-            let point_rect = Rect::from_center_size(node.pos, vec2(20., 20.));
-            let point_id = response.id.with(idx);
-            let point_response = ui.interact(point_rect, point_id, Sense::drag());
-            node.pos += point_response.drag_delta();
-            */
-            painter.add(Shape::circle_filled(
-                animate_pos(
-                    ui,
-                    egui::Id::new(format!("node-{idx}-x")),
-                    egui::Id::new(format!("node-{idx}-y")),
-                    node.pos,
-                    ui.input(|i| i.time as f32),
-                ),
-                10.,
-                self.node_color,
-            ));
-        }
+        */
     }
 }
 
@@ -240,13 +130,6 @@ impl eframe::App for PollinationViewer {
         self.draw_settings(ctx, frame);
         self.draw_scene(ctx, frame);
     }
-}
-
-fn animate_pos(ui: &mut egui::Ui, id0: egui::Id, id1: egui::Id, pos: Pos2, time: f32) -> Pos2 {
-    let x = ui.ctx().animate_value_with_time(id0, pos.x, time);
-    let y = ui.ctx().animate_value_with_time(id1, pos.y, time);
-
-    pos2(x, y)
 }
 
 fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
