@@ -3,7 +3,7 @@ use crate::{
     constants,
     engine::{Engine, EngineEvent},
     message::{PollinationMessage, Topic},
-    nucleus::Nucleus,
+    pollination::PollinationNode,
     router::Router,
 };
 use std::collections::HashMap;
@@ -25,7 +25,7 @@ pub struct Flower<E: Engine, C, R> {
 }
 
 struct NucleiState<A> {
-    nucleus: Nucleus<A>,
+    nucleus: PollinationNode<A>,
     #[allow(unused)]
     seed_list: Vec<A>,
 }

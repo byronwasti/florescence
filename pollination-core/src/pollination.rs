@@ -13,7 +13,7 @@ use uuid::Uuid;
 mod recycling;
 
 #[derive(Clone, Debug)]
-pub struct Nucleus<A> {
+pub struct PollinationNode<A> {
     uuid: Uuid,
     topic: Topic,
     propagativity: Propagativity,
@@ -22,7 +22,7 @@ pub struct Nucleus<A> {
     own_info: PeerInfo<A>,
 }
 
-impl<A> Nucleus<A>
+impl<A> PollinationNode<A>
 where
     A: Clone + for<'a> Deserialize<'a> + Serialize,
 {
@@ -82,7 +82,7 @@ where
 
     /// NOTE: Not a clean swap; the new core has most information
     /// wiped. This is a helper function to efficiently reset.
-    fn swap_cores(&mut self, mut other: Nucleus<A>) -> Nucleus<A> {
+    fn swap_cores(&mut self, mut other: PollinationNode<A>) -> PollinationNode<A> {
         self.set_raw(PeerInfo::dead());
         std::mem::swap(self, &mut other);
         self.propagativity = Propagativity::Unknown;
@@ -238,7 +238,7 @@ where
     pub(crate) fn handle_message(
         &mut self,
         message: PollinationMessage,
-    ) -> Result<NucleusResponse<A>, NucleusError> {
+    ) -> Result<PollinationResponse<A>, PollinationError> {
         use PollinationMessage::*;
         match message {
             Heartbeat { .. } => Ok(self.handle_heartbeat(message).into()),
@@ -279,7 +279,7 @@ where
     fn handle_update(
         &mut self,
         message: PollinationMessage,
-    ) -> Result<Option<PollinationMessage>, NucleusError> {
+    ) -> Result<Option<PollinationMessage>, PollinationError> {
         let PollinationMessage::Update {
             timestamp: peer_ts,
             reality_token: peer_rt,
@@ -312,7 +312,7 @@ where
     fn handle_reality_skew(
         &mut self,
         message: PollinationMessage,
-    ) -> Result<NucleusResponse<A>, NucleusError> {
+    ) -> Result<PollinationResponse<A>, PollinationError> {
         let PollinationMessage::RealitySkew {
             timestamp: peer_ts,
             reality_token: peer_rt,
@@ -325,20 +325,25 @@ where
         };
 
         match self.apply_patch(peer_rt, peer_patch) {
-            Ok(()) => Ok(NucleusResponse::response(self.msg_heartbeat())),
+            Ok(()) => Ok(PollinationResponse::response(self.msg_heartbeat())),
             Err(PatchApplyError::RealitySkew(core)) => {
                 if peer_count > self.peer_count()
                     || peer_count == self.peer_count() && peer_rt > self.reality_token
                 {
                     let old_core = self.swap_cores(*core);
-                    Ok(NucleusResponse::core_dump(self.msg_new_member(), old_core))
+                    Ok(PollinationResponse::core_dump(
+                        self.msg_new_member(),
+                        old_core,
+                    ))
                 } else {
-                    Ok(NucleusResponse::response(self.msg_reality_skew(&peer_ts)))
+                    Ok(PollinationResponse::response(
+                        self.msg_reality_skew(&peer_ts),
+                    ))
                 }
             }
             Err(PatchApplyError::SelfRemoved) => unreachable!(),
             Err(PatchApplyError::DeserializationError(err)) => {
-                Err(NucleusError::DeserializationError(err))
+                Err(PollinationError::DeserializationError(err))
             }
         }
     }
@@ -439,7 +444,7 @@ where
     }
 }
 
-impl<A> fmt::Display for Nucleus<A>
+impl<A> fmt::Display for PollinationNode<A>
 where
     A: fmt::Display,
 {
@@ -457,12 +462,12 @@ where
     }
 }
 
-pub struct NucleusResponse<A> {
+pub struct PollinationResponse<A> {
     pub response: Option<PollinationMessage>,
-    pub old_core: Option<Nucleus<A>>,
+    pub old_core: Option<PollinationNode<A>>,
 }
 
-impl<A> NucleusResponse<A> {
+impl<A> PollinationResponse<A> {
     fn response(response: Option<PollinationMessage>) -> Self {
         Self {
             response,
@@ -470,7 +475,7 @@ impl<A> NucleusResponse<A> {
         }
     }
 
-    fn core_dump(response: Option<PollinationMessage>, core: Nucleus<A>) -> Self {
+    fn core_dump(response: Option<PollinationMessage>, core: PollinationNode<A>) -> Self {
         Self {
             response,
             old_core: Some(core),
@@ -478,7 +483,7 @@ impl<A> NucleusResponse<A> {
     }
 }
 
-impl<A> From<Option<PollinationMessage>> for NucleusResponse<A> {
+impl<A> From<Option<PollinationMessage>> for PollinationResponse<A> {
     fn from(response: Option<PollinationMessage>) -> Self {
         Self {
             response,
@@ -488,7 +493,7 @@ impl<A> From<Option<PollinationMessage>> for NucleusResponse<A> {
 }
 
 #[derive(Error, Debug)]
-pub enum NucleusError {
+pub enum PollinationError {
     #[error("Deserialization error: {0}")]
     DeserializationError(#[from] crate::serialization::DeserializeError),
 
@@ -496,12 +501,14 @@ pub enum NucleusError {
     PatchApplyError,
 }
 
-impl<A> From<PatchApplyError<A>> for NucleusError {
-    fn from(value: PatchApplyError<A>) -> NucleusError {
+impl<A> From<PatchApplyError<A>> for PollinationError {
+    fn from(value: PatchApplyError<A>) -> PollinationError {
         match value {
             PatchApplyError::RealitySkew(_) => unreachable!(),
-            PatchApplyError::SelfRemoved => NucleusError::PatchApplyError,
-            PatchApplyError::DeserializationError(err) => NucleusError::DeserializationError(err),
+            PatchApplyError::SelfRemoved => PollinationError::PatchApplyError,
+            PatchApplyError::DeserializationError(err) => {
+                PollinationError::DeserializationError(err)
+            }
         }
     }
 }
@@ -509,7 +516,7 @@ impl<A> From<PatchApplyError<A>> for NucleusError {
 #[derive(Error, Debug)]
 enum PatchApplyError<A> {
     #[error("Reality skew")]
-    RealitySkew(Box<Nucleus<A>>),
+    RealitySkew(Box<PollinationNode<A>>),
 
     #[error("Update patch removed own ID")]
     SelfRemoved,
@@ -549,7 +556,7 @@ mod tests {
         let count = 5;
         let mut nuclei = (0..count)
             .map(|i| {
-                Nucleus::new(
+                PollinationNode::new(
                     Uuid::from_u128(rng.random()),
                     Topic::new("test".to_string()),
                     i,
@@ -611,8 +618,8 @@ mod tests {
 
     fn notify_of_death<R: Rng>(
         rng: &mut R,
-        nuclei: &mut [Nucleus<usize>],
-        old_core: Nucleus<usize>,
+        nuclei: &mut [PollinationNode<usize>],
+        old_core: PollinationNode<usize>,
     ) -> Option<()> {
         for (_, peer) in old_core.peers() {
             // 10% chance of failure
@@ -629,17 +636,19 @@ mod tests {
             let peer_nucl = &mut nuclei[peer_idx];
             let msg = old_core.msg_update(peer_nucl.timestamp())?;
             println!("{peer_idx} <- {msg}");
-            let _ = peer_nucl.handle_message(msg).expect("Nucleus hit an error");
+            let _ = peer_nucl
+                .handle_message(msg)
+                .expect("Pollination hit an error");
         }
         None
     }
 
     fn sync_two<R: Rng>(
         rng: &mut R,
-        nuclei: &mut [Nucleus<usize>],
+        nuclei: &mut [PollinationNode<usize>],
         i: usize,
         j: usize,
-    ) -> Option<Nucleus<usize>> {
+    ) -> Option<PollinationNode<usize>> {
         nuclei[i].bump();
         let mut msg = nuclei[i].msg_heartbeat();
         if msg.is_none() {
@@ -667,7 +676,7 @@ mod tests {
                     }
                     None => return old_core,
                 }
-                .expect("Nucleus hit an error.");
+                .expect("Pollination hit an error.");
 
                 msg = res.response;
                 if let Some(new_old_core) = res.old_core {
