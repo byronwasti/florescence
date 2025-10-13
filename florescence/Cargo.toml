@@ -1,0 +1,17 @@
+[package]
+name = "florescence"
+version = "0.2.0"
+edition = "2024"
+readme = "README.md"
+authors = [
+    "Byron Wasti <dev@byronwasti.com>"
+]
+categories = ["distributed-systems"]
+keywords = ["raft", "crdt", "gossip", "distributed"]
+description = "An experimental library exposing hybrid Raft and CRDT primitives."
+homepage = "https://github.com/byronwasti/florescence"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/byronwasti/florescence"
+
+[dependencies]
+
