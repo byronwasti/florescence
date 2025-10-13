@@ -19,7 +19,7 @@ impl Widget for ForceGraphWidget<'_> {
         let response = ui.allocate_response(ui.available_size(), Sense::hover());
         let painter = ui.painter().with_clip_rect(ui.clip_rect());
 
-        let (pos_map, fixed) = self.animated_position_map(ui, &response);
+        let (pos_map, fixed) = self.position_map(ui, &response);
         self.graph.run_force_simulation(self.config, &fixed);
         //self.ui.ctx().request_repaint();
 
@@ -36,11 +36,7 @@ impl<'a> ForceGraphWidget<'a> {
         Self { graph, config }
     }
 
-    fn animated_position_map(
-        &mut self,
-        ui: &mut Ui,
-        response: &Response,
-    ) -> (Vec<Pos2>, Vec<usize>) {
+    fn position_map(&mut self, ui: &mut Ui, response: &Response) -> (Vec<Pos2>, Vec<usize>) {
         let mut out = vec![];
         let mut fixed = vec![];
 
@@ -52,22 +48,15 @@ impl<'a> ForceGraphWidget<'a> {
             node.pos += point_response.drag_delta();
 
             let pos = if point_response.dragged() {
-                println!("Fixed point: {idx}");
                 fixed.push(idx);
                 interact = true;
                 node.pos
             } else {
                 if point_response.drag_stopped() {
-                    println!("Drag stopped");
+                    interact = true;
                     //ui.ctx().clear_animations();
                 }
-                animate_pos(
-                    ui,
-                    egui::Id::new(format!("node-{idx}-x")),
-                    egui::Id::new(format!("node-{idx}-y")),
-                    node.pos,
-                    ui.input(|i| i.time as f32),
-                )
+                node.pos
             };
 
             out.push(pos)
@@ -103,15 +92,6 @@ impl<'a> ForceGraphWidget<'a> {
             ));
         }
     }
-}
-
-fn animate_pos(ui: &mut egui::Ui, id0: egui::Id, id1: egui::Id, pos: Pos2, time: f32) -> Pos2 {
-    /* TODO: Fix
-    let x = ui.ctx().animate_value_with_time(id0, pos.x, time * 10.);
-    let y = ui.ctx().animate_value_with_time(id1, pos.y, time * 10.);
-    pos2(x, y)
-    */
-    pos
 }
 
 pub struct ForceGraphSettingsWidget<'a> {

@@ -47,7 +47,7 @@ impl ForceGraph {
     pub fn random() -> ForceGraph {
         let mut g = Graph::<Node, ()>::new();
 
-        let count = 20;
+        let count = 100;
 
         for i in 0..count {
             let _ = g.add_node(Node {
