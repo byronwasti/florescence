@@ -1,53 +1,37 @@
 use crate::constants;
 use std::fmt;
-use std::time::Instant;
 use treeclocks::IdTree;
 
-pub trait TimeoutProvider {
-    fn start() -> Self;
-    fn elapsed(&self) -> bool;
-}
-
-impl TimeoutProvider for Instant {
-    fn start() -> Self {
-        Instant::now()
-    }
-
-    fn elapsed(&self) -> bool {
-        // TODO: Make the timeout configurable
-        self.elapsed() > constants::PROPAGATION_TIMEOUT
-    }
-}
-
 #[derive(Debug, Clone)]
-pub(crate) enum Propagativity<T = Instant> {
+pub(crate) enum Propagativity {
     Unknown,
     Propagating(IdTree),
-    Resting(IdTree, T),
+    Resting(IdTree),
 }
 
-impl<T: TimeoutProvider> Propagativity<T> {
+impl Propagativity {
     pub(crate) fn id(&self) -> Option<&IdTree> {
         use Propagativity::*;
         match self {
-            Propagating(id) | Resting(id, _) => Some(id),
+            Propagating(id) | Resting(id) => Some(id),
             Unknown => None,
         }
     }
 
-    pub(crate) fn force_propagating(&mut self) {
+    pub(crate) fn set_propagating(&mut self) -> bool {
         use Propagativity::*;
         let s = std::mem::replace(self, Self::Unknown);
         match s {
             Propagating(id) | Resting(id, ..) => {
                 *self = Propagativity::Propagating(id);
+                true
             }
-            Unknown => {}
+            Unknown => false,
         }
     }
 
     pub(crate) fn resting(id: IdTree) -> Self {
-        Propagativity::Resting(id, T::start())
+        Propagativity::Resting(id)
     }
 
     pub(crate) fn propagate(&mut self) -> Option<IdTree> {
@@ -56,25 +40,19 @@ impl<T: TimeoutProvider> Propagativity<T> {
         match s {
             Propagating(id) => {
                 let (id, peer_id) = id.fork();
-                *self = Propagativity::Resting(id, T::start());
+                *self = Propagativity::Resting(id);
                 Some(peer_id)
             }
-            Resting(id, timeout) => {
-                if timeout.elapsed() {
-                    let (id, peer_id) = id.fork();
-                    *self = Propagativity::Resting(id, T::start());
-                    Some(peer_id)
-                } else {
-                    *self = Propagativity::Resting(id, timeout);
-                    None
-                }
+            Resting(id) => {
+                *self = Propagativity::Resting(id);
+                None
             }
             Unknown => None,
         }
     }
 }
 
-impl<T: Default> Default for Propagativity<T> {
+impl Default for Propagativity {
     fn default() -> Self {
         Self::Unknown
     }
@@ -86,7 +64,7 @@ impl fmt::Display for Propagativity {
         match self {
             Unknown => write!(f, "x"),
             Propagating(id) => write!(f, "p.{id}"),
-            Resting(id, _timeout) => write!(f, "r.{id}"),
+            Resting(id) => write!(f, "r.{id}"),
         }
     }
 }

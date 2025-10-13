@@ -63,17 +63,9 @@ where
         self.core_map.iter()
     }
 
-    /*
     pub fn set_propagating(&mut self) -> bool {
-        use Propagativity::*;
-        self.propagativity = match self.propagativity {
-            Unknown => Unknown,
-            Propagating(id) | Resting(id) => Propagating(id)
-        };
-
-        !matches!(self.propagativity, Unknown)
+        self.propagativity.set_propagating()
     }
-    */
 
     fn set_raw(&mut self, own_info: PeerInfo<A>) -> Option<()> {
         let dead = matches!(own_info.status, PeerStatus::Dead);
@@ -595,7 +587,7 @@ mod tests {
                 for i in 0..count {
                     println!("STATE {i}: {}", nuclei[i]);
                     // Reset propagativity so we don't have to wait
-                    nuclei[i].propagativity.force_propagating();
+                    nuclei[i].propagativity.set_propagating();
 
                     // Also do any cleanup
                     // TODO: Test delayed cleanup
