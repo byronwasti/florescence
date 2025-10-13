@@ -27,7 +27,7 @@ where
     A: Clone + for<'a> Deserialize<'a> + Serialize,
 {
     #[allow(unused)]
-    pub(crate) fn new(uuid: Uuid, topic: Topic, own_data: A) -> Self {
+    pub fn new(uuid: Uuid, topic: Topic, own_data: A) -> Self {
         let own_info = PeerInfo::new(uuid, own_data);
         let reality_token = RealityToken::new(uuid);
         let mut core_map = ItcMap::new();
@@ -42,26 +42,38 @@ where
         }
     }
 
-    pub(crate) fn timestamp(&self) -> &EventTree {
+    pub fn timestamp(&self) -> &EventTree {
         self.core_map.timestamp()
     }
 
-    pub(crate) fn id(&self) -> Option<&IdTree> {
+    pub fn id(&self) -> Option<&IdTree> {
         self.propagativity.id()
     }
 
-    pub(crate) fn peer_count(&self) -> usize {
+    pub fn peer_count(&self) -> usize {
         self.core_map.len()
     }
 
-    pub(crate) fn bump(&mut self) {
+    pub fn bump(&mut self) {
         // TODO: Optimized version
         self.set_raw(self.own_info.clone());
     }
 
-    pub(crate) fn peers(&self) -> impl Iterator<Item = (&IdTree, &PeerInfo<A>)> {
+    pub fn peers(&self) -> impl Iterator<Item = (&IdTree, &PeerInfo<A>)> {
         self.core_map.iter()
     }
+
+    /*
+    pub fn set_propagating(&mut self) -> bool {
+        use Propagativity::*;
+        self.propagativity = match self.propagativity {
+            Unknown => Unknown,
+            Propagating(id) | Resting(id) => Propagating(id)
+        };
+
+        !matches!(self.propagativity, Unknown)
+    }
+    */
 
     fn set_raw(&mut self, own_info: PeerInfo<A>) -> Option<()> {
         let dead = matches!(own_info.status, PeerStatus::Dead);
@@ -191,7 +203,7 @@ where
         Ok(())
     }
 
-    pub(crate) fn reap_souls(&mut self) -> bool {
+    pub fn reap_souls(&mut self) -> bool {
         self.reap_souls_inner().is_some()
     }
 
@@ -235,7 +247,7 @@ where
 
     /* Message Handling */
 
-    pub(crate) fn handle_message(
+    pub fn handle_message(
         &mut self,
         message: PollinationMessage,
     ) -> Result<PollinationResponse<A>, PollinationError> {
@@ -383,7 +395,7 @@ where
         }
     }
 
-    pub(crate) fn msg_heartbeat(&self) -> Option<PollinationMessage> {
+    pub fn msg_heartbeat(&self) -> Option<PollinationMessage> {
         let id = self.id()?.clone();
         Some(PollinationMessage::Heartbeat {
             uuid: self.uuid,
@@ -394,7 +406,7 @@ where
         })
     }
 
-    pub(crate) fn msg_update(&self, peer_ts: &EventTree) -> Option<PollinationMessage> {
+    pub fn msg_update(&self, peer_ts: &EventTree) -> Option<PollinationMessage> {
         let id = self.id()?.clone();
         let patch = self.create_patch(peer_ts);
         Some(PollinationMessage::Update {
@@ -514,7 +526,7 @@ impl<A> From<PatchApplyError<A>> for PollinationError {
 }
 
 #[derive(Error, Debug)]
-enum PatchApplyError<A> {
+pub enum PatchApplyError<A> {
     #[error("Reality skew")]
     RealitySkew(Box<PollinationNode<A>>),
 

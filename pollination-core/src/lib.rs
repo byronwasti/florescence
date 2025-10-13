@@ -1,22 +1,18 @@
 #[macro_use]
 extern crate tracing;
 
-mod constants;
-mod ds;
-pub mod engine;
-pub mod flower;
-//mod handle;
 mod clock;
+mod constants;
+mod message;
 mod peer_info;
 mod pollination;
 mod propagativity;
+mod reality_token;
 mod router;
 mod serialization;
-
-pub mod connection;
-pub mod message;
-pub mod pollinator;
-pub mod reality_token;
 mod topic;
 
-pub use flower::{Flower, FlowerBuilder, FlowerError};
+pub use message::{BinaryPatch, PollinationMessage};
+pub use pollination::{PollinationError, PollinationNode, PollinationResponse};
+pub use topic::Topic;
+pub use propagativity::TimeoutProvider;
