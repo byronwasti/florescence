@@ -3,7 +3,7 @@ use std::fmt;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct PeerInfo<A> {
+pub struct PeerInfo<A> {
     pub uuid: Uuid,
     pub addr: Option<A>,
     pub status: PeerStatus,

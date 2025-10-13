@@ -1,4 +1,3 @@
-use crate::constants;
 use std::fmt;
 use treeclocks::IdTree;
 
