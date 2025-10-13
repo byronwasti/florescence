@@ -1,12 +1,12 @@
 [package]
 name = "pollination"
 version = "0.1.0"
-readme = "README.md"
+readme = "../README.md"
 edition = "2024"
 authors = [
     "Byron Wasti <dev@byronwasti.com>"
 ]
-categories = ["distributed-systems"]
+categories = ["data-structures"]
 keywords = ["raft", "crdt", "gossip", "distributed"]
 description = "An experimental library exposing hybrid Raft and CRDT primitives."
 homepage = "https://github.com/byronwasti/florescence"
