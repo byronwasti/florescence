@@ -6,12 +6,12 @@ mod ds;
 pub mod engine;
 pub mod flower;
 //mod handle;
+mod clock;
 mod nucleus;
 mod peer_info;
 mod propagativity;
-mod serialization;
-mod clock;
 mod router;
+mod serialization;
 
 pub mod connection;
 pub mod message;

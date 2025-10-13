@@ -1,9 +1,9 @@
 use crate::{
+    clock::Clock,
     constants,
     engine::{Engine, EngineEvent},
     message::{PollinationMessage, Topic},
     nucleus::Nucleus,
-    clock::Clock,
     router::Router,
 };
 use std::collections::HashMap;
