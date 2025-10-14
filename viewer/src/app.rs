@@ -14,6 +14,8 @@ use std::{
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct PollinationViewer {
+    config: ForceGraphConfig,
+
     #[serde(skip)]
     scene: Rect,
 
@@ -23,10 +25,13 @@ pub struct PollinationViewer {
     #[serde(skip)]
     simulation: Simulation,
 
-    config: ForceGraphConfig,
+    //#[serde(skip)]
+    //event_log: Vec<StepResponse>,
 
     #[serde(skip)]
-    time: f32,
+    last_step_time: f64,
+
+    simulation_speed: f64,
 }
 
 impl Default for PollinationViewer {
@@ -38,8 +43,22 @@ impl Default for PollinationViewer {
             graph,
             config: ForceGraphConfig::default(),
             simulation,
-            time: 0.,
+            last_step_time: 0.,
+            simulation_speed: 1.,
         }
+    }
+}
+
+impl eframe::App for PollinationViewer {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, eframe::APP_KEY, self);
+    }
+
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.run_simulation(ctx, frame);
+        self.draw_header(ctx, frame);
+        self.draw_settings(ctx, frame);
+        self.draw_scene(ctx, frame);
     }
 }
 
@@ -58,6 +77,24 @@ impl PollinationViewer {
         }
     }
 
+    fn run_simulation(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let time = ctx.input(|i| i.time);
+        if self.last_step_time < (time - self.simulation_speed) {
+            println!("Running sim step: {}", self.simulation_speed);
+            self.last_step_time = time;
+            let res = self.simulation.step(&SimConfig {
+                timeout_propagativity: 10,
+                timeout_heartbeat: 10,
+                timeout_reap: 10,
+            });
+            //println!("RES: {res:?}");
+            //self.event_log.push(res)
+        }
+
+        // TODO: More efficient way to do this?
+        ctx.request_repaint();
+    }
+
     fn draw_settings(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::Window::new("Settings").show(ctx, |ui| {
             /*
@@ -74,10 +111,17 @@ impl PollinationViewer {
 
             //ui.color_edit_button_srgba(&mut self.config.node_color);
             //ui.color_edit_button_srgba(&mut self.config.edge_color);
+
+            ui.add(egui::Slider::new(&mut self.simulation_speed, 0.0..=10.).text("Simulation speed"));
             ui.add(ForceGraphSettingsWidget::new(
                 &mut self.graph,
                 &mut self.config,
             ));
+        });
+    }
+
+    fn draw_event_log(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::Window::new("Event Log").show(ctx, |ui| {
         });
     }
 
@@ -133,18 +177,7 @@ impl PollinationViewer {
 
     fn draw_scene_stats(&self, ui: &mut Ui) {
         ui.label(format!("Scene rect: {:#?}", &self.scene));
-    }
-}
-
-impl eframe::App for PollinationViewer {
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, eframe::APP_KEY, self);
-    }
-
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        self.draw_header(ctx, frame);
-        self.draw_settings(ctx, frame);
-        self.draw_scene(ctx, frame);
+        ui.label(format!("Time: {:#?}", &ui.input(|i| i.time)));
     }
 }
 

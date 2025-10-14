@@ -90,7 +90,7 @@ impl Simulation {
             }
         } else {
             let last_heartbeat = self.get_node_last_heartbeat(active_id);
-            if last_heartbeat < (self.timestamp - config.timeout_heartbeat) {
+            if last_heartbeat < self.timestamp.saturating_sub(config.timeout_heartbeat) {
                 let active_node = self
                     .nodes
                     .node_weight_mut(active_id)
@@ -148,7 +148,7 @@ impl Simulation {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct StepResponse {
     active_id: NodeIndex,
     peers: Vec<NodeIndex>,
