@@ -12,6 +12,8 @@ pub use graph::ForceGraph;
 pub struct ForceGraphWidget<'a> {
     graph: &'a mut ForceGraph,
     config: &'a mut ForceGraphConfig,
+    node_color_provider: Option<&'a dyn Fn(u32) -> (Color32, Color32)>,
+    edge_color_provider: Option<&'a dyn Fn(u32, u32) -> Color32>,
 }
 
 impl Widget for ForceGraphWidget<'_> {
@@ -33,7 +35,28 @@ impl<'a> ForceGraphWidget<'a> {
         graph: &'a mut ForceGraph,
         config: &'a mut ForceGraphConfig,
     ) -> ForceGraphWidget<'a> {
-        Self { graph, config }
+        Self {
+            graph,
+            config,
+            node_color_provider: None,
+            edge_color_provider: None,
+        }
+    }
+
+    pub fn with_node_color_provider(
+        mut self,
+        node_colors: &'a (dyn Fn(u32) -> (Color32, Color32)),
+    ) -> Self {
+        self.node_color_provider = Some(node_colors);
+        self
+    }
+
+    pub fn with_edge_color_provider(
+        mut self,
+        edge_colors: &'a (dyn Fn(u32, u32) -> Color32),
+    ) -> Self {
+        self.edge_color_provider = Some(edge_colors);
+        self
     }
 
     fn position_map(&mut self, ui: &mut Ui, response: &Response) -> (Vec<Pos2>, Vec<usize>) {
@@ -72,24 +95,27 @@ impl<'a> ForceGraphWidget<'a> {
             for neighbor in self.graph.inner().neighbors((node.id as u32).into()) {
                 let neighbor = self.graph.inner().node_weight(neighbor).unwrap();
 
+                let color = if let Some(edge_color_fn) = &self.edge_color_provider {
+                    edge_color_fn(node.id as u32, neighbor.id as u32)
+                } else {
+                    self.config.edge_color
+                };
                 painter.add(Shape::line_segment(
                     [pos_map[node.id], pos_map[neighbor.id]],
-                    (3., self.config.edge_color),
+                    (3., color),
                 ));
             }
         }
 
         for (idx, node) in self.graph.inner().node_weights().enumerate() {
-            painter.add(Shape::circle_filled(
-                pos_map[idx],
-                15.,
-                self.config.ring_color,
-            ));
-            painter.add(Shape::circle_filled(
-                pos_map[idx],
-                10.,
-                self.config.node_color,
-            ));
+            let (ring_color, node_color) = if let Some(color_fn) = &self.node_color_provider {
+                color_fn(idx as u32)
+            } else {
+                (self.config.ring_color, self.config.node_color)
+            };
+
+            painter.add(Shape::circle_filled(pos_map[idx], 15., ring_color));
+            painter.add(Shape::circle_filled(pos_map[idx], 10., node_color));
         }
     }
 }

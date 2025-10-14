@@ -1,9 +1,15 @@
-use crate::widgets::{ForceGraph, ForceGraphConfig, ForceGraphSettingsWidget, ForceGraphWidget};
+use crate::{
+    simulation::{SimConfig, Simulation},
+    widgets::{ForceGraph, ForceGraphConfig, ForceGraphSettingsWidget, ForceGraphWidget},
+};
 use egui::{
     Color32, Frame, Painter, Pos2, Rect, Scene, Sense, Shape, Stroke, Ui, Vec2, emath, pos2, vec2,
 };
 use fjadra::force::SimulationBuilder;
-use std::f32::consts::TAU;
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -14,6 +20,9 @@ pub struct PollinationViewer {
     #[serde(skip)]
     graph: ForceGraph,
 
+    #[serde(skip)]
+    simulation: Simulation,
+
     config: ForceGraphConfig,
 
     #[serde(skip)]
@@ -22,10 +31,13 @@ pub struct PollinationViewer {
 
 impl Default for PollinationViewer {
     fn default() -> Self {
+        let simulation = Simulation::new(10, 1023, 2);
+        let graph = ForceGraph::from_graph(&simulation.graph());
         Self {
             scene: Rect::ZERO,
-            graph: ForceGraph::random(),
+            graph,
             config: ForceGraphConfig::default(),
+            simulation,
             time: 0.,
         }
     }
@@ -45,9 +57,7 @@ impl PollinationViewer {
             Default::default()
         }
     }
-}
 
-impl PollinationViewer {
     fn draw_settings(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::Window::new("Settings").show(ctx, |ui| {
             /*
@@ -103,7 +113,19 @@ impl PollinationViewer {
                 .max_inner_size([350.0, 1000.0])
                 .zoom_range(0.1..=10.0)
                 .show(ui, &mut rect, |ui| {
-                    ui.add(ForceGraphWidget::new(&mut self.graph, &mut self.config))
+                    ui.add(
+                        ForceGraphWidget::new(&mut self.graph, &mut self.config)
+                            .with_node_color_provider(&|id: u32| {
+                                let reality_token =
+                                    self.simulation.get_node(id.into()).inner.reality_token();
+                                let timestamp =
+                                    self.simulation.get_node(id.into()).inner.timestamp();
+                                (
+                                    hashable_to_color(reality_token),
+                                    hashable_to_color(timestamp),
+                                )
+                            }),
+                    )
                 });
             self.scene = rect;
         });
@@ -111,12 +133,6 @@ impl PollinationViewer {
 
     fn draw_scene_stats(&self, ui: &mut Ui) {
         ui.label(format!("Scene rect: {:#?}", &self.scene));
-        /*
-        ui.label(format!(
-            "k: {:#?}",
-            &self.config.k(self.graph.node_count() as f32)
-        ));
-        */
     }
 }
 
@@ -144,4 +160,14 @@ fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
         );
         ui.label(".");
     });
+}
+
+fn hashable_to_color<T: Hash>(hashable: T) -> Color32 {
+    let mut hasher = DefaultHasher::new();
+    hashable.hash(&mut hasher);
+    let hash = hasher.finish();
+    let red = hash as u8;
+    let green = (hash >> 8) as u8;
+    let blue = (hash >> 16) as u8;
+    Color32::from_rgb(red, green, blue)
 }

@@ -26,6 +26,23 @@ pub(crate) struct State {
 }
 
 impl ForceGraph {
+    pub fn from_graph<T>(graph: &Graph<T, ()>) -> Self {
+        let g = graph.map(
+            |idx, _| Node {
+                id: idx.index(),
+                pos: pos2(0., 0.),
+            },
+            |_, _| (),
+        );
+
+        Self {
+            inner: g,
+            state: State {
+                first: true,
+                interact: false,
+            },
+        }
+    }
     pub fn from_inner(inner: Graph<Node, ()>) -> Self {
         Self {
             inner,

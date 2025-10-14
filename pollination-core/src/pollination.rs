@@ -63,6 +63,10 @@ where
         self.core_map.iter()
     }
 
+    pub fn reality_token(&self) -> RealityToken {
+        self.reality_token
+    }
+
     pub fn set_propagating(&mut self) -> bool {
         self.propagativity.set_propagating()
     }
@@ -425,7 +429,7 @@ where
         })
     }
 
-    fn msg_new_member(&self) -> Option<PollinationMessage> {
+    pub fn msg_new_member(&self) -> Option<PollinationMessage> {
         Some(PollinationMessage::NewMember {
             uuid: self.uuid,
             topic: self.topic.clone(),
