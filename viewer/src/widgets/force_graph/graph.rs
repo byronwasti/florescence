@@ -81,7 +81,6 @@ impl ForceGraph {
                 let j = rng.random_range(0..count - 1);
                 let j = if j >= i { j + 1 } else { j };
 
-                println!("Extending {i} to {j}");
                 g.extend_with_edges(&[(i as u32, j as u32)]);
             }
         }
@@ -120,7 +119,6 @@ impl ForceGraph {
         if !self.state.first && !self.state.interact {
             return;
         }
-        println!("Running force sim");
 
         let g = &mut self.inner;
         let nodes = g.node_weights().enumerate().map(|(idx, n)| {
@@ -161,7 +159,7 @@ impl ForceGraph {
             .add_force("charge", ManyBody::new())
             //.add_force("positionx", PositionY::new().strength(0.001))
             //.add_force("positiony", PositionX::new().strength(0.1))
-            .add_force("center", Center::new());
+            .add_force("center", Center::new().strength(config.centering_strength));
 
         let positions = sim.iter().last().expect("Sim should always return");
 

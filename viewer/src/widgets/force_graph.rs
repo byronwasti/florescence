@@ -136,9 +136,11 @@ impl<'a> ForceGraphSettingsWidget<'a> {
 
 impl Widget for ForceGraphSettingsWidget<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
+        /*
         if ui.button("Reset").clicked() {
             *self.graph = ForceGraph::random();
         }
+        */
 
         ui.checkbox(&mut self.config.velocity_decay_enabled, "velocity_decay");
         if self.config.velocity_decay_enabled {
@@ -163,6 +165,11 @@ impl Widget for ForceGraphSettingsWidget<'_> {
                 0.0..=1000.0,
             ));
         }
+
+        ui.add(
+            egui::Slider::new(&mut self.config.centering_strength, 0.0..=5.0)
+                .text("Centering strength"),
+        );
 
         ui.color_edit_button_srgba(&mut self.config.ring_color);
         ui.color_edit_button_srgba(&mut self.config.node_color);

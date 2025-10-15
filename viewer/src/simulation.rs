@@ -12,12 +12,34 @@ pub struct SimConfig {
 
 pub struct Simulation {
     nodes: Graph<SimNode, ()>,
-    timestamp: u64,
+    pub time: u64,
+    seed: u64,
     rng: StdRng,
+    rand_robin_count: usize,
+    converge_time: Option<u64>,
+}
+
+impl Default for Simulation {
+    fn default() -> Simulation {
+        let seed = rand::rng().random();
+        Self {
+            nodes: Graph::new(),
+            time: 0,
+            seed,
+            rng: StdRng::seed_from_u64(seed),
+            rand_robin_count: 2,
+            converge_time: None,
+        }
+    }
 }
 
 impl Simulation {
-    pub fn new(node_count: usize, seed: u64, connections: usize) -> Simulation {
+    pub fn new(
+        node_count: usize,
+        seed: u64,
+        connections: usize,
+        rand_robin_count: usize,
+    ) -> Simulation {
         let mut rng = StdRng::seed_from_u64(seed);
 
         let mut nodes = Graph::new();
@@ -46,8 +68,11 @@ impl Simulation {
 
         Self {
             nodes,
-            timestamp: 0,
+            time: 0,
+            seed,
             rng,
+            rand_robin_count,
+            converge_time: None,
         }
     }
 
@@ -55,9 +80,28 @@ impl Simulation {
         &self.nodes
     }
 
-    pub fn step(&mut self, config: &SimConfig) -> StepResponse {
-        self.timestamp += 1;
+    pub fn converge_time(&self) -> Option<u64> {
+        self.converge_time
+    }
 
+    fn converged(&self) -> bool {
+        let mut iter = self.nodes.node_weights();
+        let first = iter.next().unwrap();
+        iter.all(|n| n.inner.reality_token() == first.inner.reality_token())
+    }
+
+    pub fn step(&mut self, config: &SimConfig) -> StepResponse {
+        self.time += 1;
+
+        let res = self.step_inner(config);
+
+        if self.converge_time.is_none() && self.converged() {
+            self.converge_time = Some(self.time)
+        }
+
+        res
+    }
+    pub fn step_inner(&mut self, config: &SimConfig) -> StepResponse {
         let active_id = NodeIndex::from(self.rng.random_range(0..self.nodes.node_count()) as u32);
 
         let in_msg = self.get_node_mut(active_id).mailbox.pop_front();
@@ -90,13 +134,13 @@ impl Simulation {
             }
         } else {
             let last_heartbeat = self.get_node_last_heartbeat(active_id);
-            if last_heartbeat < self.timestamp.saturating_sub(config.timeout_heartbeat) {
+            if last_heartbeat < self.time.saturating_sub(config.timeout_heartbeat) {
                 let active_node = self
                     .nodes
                     .node_weight_mut(active_id)
                     .expect("Can't find Node associated with ID");
                 active_node.inner.bump();
-                active_node.last_heartbeat = self.timestamp;
+                active_node.last_heartbeat = self.time;
 
                 let out_message = active_node
                     .inner
@@ -109,10 +153,24 @@ impl Simulation {
                     peers.push(peer_id);
                 }
 
-                for peer_id in &peers {
-                    self.get_node_mut(*peer_id)
-                        .mailbox
-                        .push_back((active_id, out_message.clone()));
+                if peers.is_empty() {
+                    for _ in 0..self.rand_robin_count {
+                        let peer_id = self.rng.random_range(0..self.nodes.node_count() - 1);
+                        let peer_id = if peer_id >= active_id.index() {
+                            peer_id + 1
+                        } else {
+                            peer_id
+                        };
+                        self.get_node_mut(NodeIndex::new(peer_id))
+                            .mailbox
+                            .push_back((active_id, out_message.clone()));
+                    }
+                } else {
+                    for peer_id in &peers {
+                        self.get_node_mut(*peer_id)
+                            .mailbox
+                            .push_back((active_id, out_message.clone()));
+                    }
                 }
 
                 StepResponse {

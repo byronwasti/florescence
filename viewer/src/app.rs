@@ -27,16 +27,26 @@ pub struct PollinationViewer {
 
     //#[serde(skip)]
     //event_log: Vec<StepResponse>,
-
     #[serde(skip)]
     last_step_time: f64,
 
     simulation_speed: f64,
+    per_step: usize,
+    node_count: usize,
+    connection_count: usize,
+    rand_robin_count: usize,
+    seed: u64,
+
+    #[serde(skip)]
+    play: bool,
+
+    #[serde(skip)]
+    first: bool,
 }
 
 impl Default for PollinationViewer {
     fn default() -> Self {
-        let simulation = Simulation::new(10, 1023, 2);
+        let simulation = Simulation::new(10, 1234, 2, 2);
         let graph = ForceGraph::from_graph(&simulation.graph());
         Self {
             scene: Rect::ZERO,
@@ -45,6 +55,14 @@ impl Default for PollinationViewer {
             simulation,
             last_step_time: 0.,
             simulation_speed: 1.,
+            per_step: 1,
+            node_count: 10,
+            connection_count: 2,
+            rand_robin_count: 2,
+            seed: 1234,
+
+            play: false,
+            first: true,
         }
     }
 }
@@ -55,6 +73,10 @@ impl eframe::App for PollinationViewer {
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if self.first {
+            self.first = false;
+            self.reset();
+        }
         self.run_simulation(ctx, frame);
         self.draw_header(ctx, frame);
         self.draw_settings(ctx, frame);
@@ -78,15 +100,37 @@ impl PollinationViewer {
     }
 
     fn run_simulation(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.play {
+            return;
+        }
+
         let time = ctx.input(|i| i.time);
         if self.last_step_time < (time - self.simulation_speed) {
-            println!("Running sim step: {}", self.simulation_speed);
             self.last_step_time = time;
-            let res = self.simulation.step(&SimConfig {
-                timeout_propagativity: 10,
-                timeout_heartbeat: 10,
-                timeout_reap: 10,
-            });
+
+            for _ in 0..self.per_step {
+                let mut simulation = std::mem::take(&mut self.simulation);
+                let res = std::panic::catch_unwind(|| {
+                    let res = simulation.step(&SimConfig {
+                        timeout_propagativity: 10,
+                        timeout_heartbeat: 10,
+                        timeout_reap: 10,
+                    });
+                    (res, simulation)
+                });
+                match res {
+                    Ok((res, simulation)) => {
+                        self.simulation = simulation;
+                    }
+                    Err(err) => {
+                        println!("Caught a panic; restarting sim");
+
+                        self.reset();
+                    }
+                }
+
+                // TODO: Do something with res, log it??
+            }
             //println!("RES: {res:?}");
             //self.event_log.push(res)
         }
@@ -97,22 +141,48 @@ impl PollinationViewer {
 
     fn draw_settings(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::Window::new("Settings").show(ctx, |ui| {
-            /*
-            if ui.button("Step").clicked() {
-                self.time += 1.0;
+            ui.label(format!("Simulation Time: {:#?}", self.simulation.time));
+            if let Some(converge_time) = self.simulation.converge_time() {
+                ui.label(format!("Converged at: {converge_time}"));
             }
-
-            ui.add(egui::Slider::new(&mut self.config.c, 0.0..=1.0).text("c"));
 
             if ui.button("Reset").clicked() {
-                self.graph = ForceGraph::random();
+                self.reset();
             }
-            */
 
-            //ui.color_edit_button_srgba(&mut self.config.node_color);
-            //ui.color_edit_button_srgba(&mut self.config.edge_color);
+            ui.horizontal(|ui| {
+                let word = if self.play { "Pause" } else { "Play" };
+                if ui.button(word).clicked() {
+                    self.play = !self.play;
+                }
 
-            ui.add(egui::Slider::new(&mut self.simulation_speed, 0.0..=10.).text("Simulation speed"));
+                if ui.button("Step").clicked() {
+                    self.play = true;
+                    self.run_simulation(ctx, _frame);
+                    self.play = false;
+                }
+            });
+
+            ui.add(
+                egui::Slider::new(&mut self.simulation_speed, 0.001..=10.).text("Simulation speed"),
+            );
+            ui.add(egui::Slider::new(&mut self.per_step, 0..=100).text("Iterations per step"));
+            ui.add(egui::Slider::new(&mut self.node_count, 1..=100).text("Node count"));
+            ui.add(egui::Slider::new(&mut self.connection_count, 0..=100).text("Connection count"));
+            if self.connection_count == 0 {
+                ui.add(
+                    egui::Slider::new(&mut self.rand_robin_count, 0..=100)
+                        .text("Rand robing count"),
+                );
+            }
+
+            let mut s = self.seed.to_string();
+            if ui.text_edit_singleline(&mut s).changed() {
+                if let Ok(seed) = s.parse::<u64>() {
+                    self.seed = seed;
+                }
+            }
+
             ui.add(ForceGraphSettingsWidget::new(
                 &mut self.graph,
                 &mut self.config,
@@ -121,8 +191,7 @@ impl PollinationViewer {
     }
 
     fn draw_event_log(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::Window::new("Event Log").show(ctx, |ui| {
-        });
+        egui::Window::new("Event Log").show(ctx, |ui| {});
     }
 
     fn draw_header(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -177,7 +246,18 @@ impl PollinationViewer {
 
     fn draw_scene_stats(&self, ui: &mut Ui) {
         ui.label(format!("Scene rect: {:#?}", &self.scene));
-        ui.label(format!("Time: {:#?}", &ui.input(|i| i.time)));
+        ui.label(format!("Seconds since start: {:#?}", &ui.input(|i| i.time)));
+    }
+
+    fn reset(&mut self) {
+        self.play = false;
+        self.simulation = Simulation::new(
+            self.node_count,
+            self.seed,
+            self.connection_count,
+            self.rand_robin_count,
+        );
+        self.graph = ForceGraph::from_graph(self.simulation.graph());
     }
 }
 

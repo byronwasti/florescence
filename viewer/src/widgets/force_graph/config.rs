@@ -16,6 +16,8 @@ pub struct ForceGraphConfig {
     pub link_strength_enabled: bool,
     pub link_strength: f64,
 
+    pub centering_strength: f64,
+
     pub ring_color: Color32,
     pub node_color: Color32,
     pub edge_color: Color32,
@@ -30,6 +32,8 @@ impl Default for ForceGraphConfig {
             link_distance: 0.,
             link_strength_enabled: false,
             link_strength: 0.,
+
+            centering_strength: 1.,
 
             ring_color: Color32::LIGHT_GRAY,
             node_color: Color32::LIGHT_BLUE,
