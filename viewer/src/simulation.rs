@@ -11,7 +11,7 @@ pub struct SimConfig {
 }
 
 pub struct Simulation {
-    nodes: Graph<SimNode, ()>,
+    pub nodes: Graph<SimNode, ()>,
     pub time: u64,
     seed: u64,
     rng: StdRng,
@@ -47,7 +47,7 @@ impl Simulation {
         for id in 0..node_count {
             nodes.add_node(SimNode {
                 inner: PollinationNode::new(
-                    Uuid::from_u128(id as u128),
+                    Uuid::new_v4(),
                     Topic::new("b".to_string()),
                     NodeIndex::from(id as u32),
                 ),

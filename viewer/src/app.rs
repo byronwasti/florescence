@@ -3,7 +3,8 @@ use crate::{
     widgets::{ForceGraph, ForceGraphConfig, ForceGraphSettingsWidget, ForceGraphWidget},
 };
 use egui::{
-    Color32, Frame, Painter, Pos2, Rect, Scene, Sense, Shape, Stroke, Ui, Vec2, emath, pos2, vec2,
+    Color32, Frame, Painter, Pos2, Rect, Scene, ScrollArea, Sense, Shape, Stroke, Ui, Vec2, emath,
+    pos2, vec2,
 };
 use fjadra::force::SimulationBuilder;
 use std::{
@@ -80,6 +81,7 @@ impl eframe::App for PollinationViewer {
         self.run_simulation(ctx, frame);
         self.draw_header(ctx, frame);
         self.draw_settings(ctx, frame);
+        self.draw_overview(ctx, frame);
         self.draw_scene(ctx, frame);
     }
 }
@@ -192,6 +194,22 @@ impl PollinationViewer {
 
     fn draw_event_log(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::Window::new("Event Log").show(ctx, |ui| {});
+    }
+
+    fn draw_overview(&self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::Window::new("Overview").show(ctx, |ui| {
+            ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
+                for (idx, node) in self.simulation.nodes.node_weights().enumerate() {
+                    ui.label(format!("Node: {}", idx));
+                    ui.label(format!("Uuid: {}", node.inner.uuid()));
+                    ui.label(format!("\tReality Token: {}", node.inner.reality_token()));
+                    if let Some(id) = node.inner.id() {
+                        ui.label(format!("\tid: {id}"));
+                    }
+                    ui.label(format!("\tTimestamp: {}", node.inner.timestamp()));
+                }
+            })
+        });
     }
 
     fn draw_header(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {

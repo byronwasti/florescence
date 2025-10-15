@@ -67,6 +67,10 @@ where
         self.reality_token
     }
 
+    pub fn uuid(&self) -> Uuid {
+        self.uuid
+    }
+
     pub fn set_propagating(&mut self) -> bool {
         self.propagativity.set_propagating()
     }
