@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = [ "florescence",
-    "pollination-core",
+    "pollination-core", "simulation",
 ]
 exclude = [
     "viewer",

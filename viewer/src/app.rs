@@ -2,6 +2,10 @@ use crate::{
     simulation::{SimConfig, Simulation},
     widgets::{ForceGraph, ForceGraphConfig, ForceGraphSettingsWidget, ForceGraphWidget},
 };
+use pollination_simulation::{
+    Sim,
+    SimNode, StartupConfig, StepConfig,
+};
 use egui::{
     Color32, Frame, Painter, Pos2, Rect, Scene, ScrollArea, Sense, Shape, Stroke, Ui, Vec2, emath,
     pos2, vec2,
@@ -26,8 +30,9 @@ pub struct PollinationViewer {
     #[serde(skip)]
     simulation: Simulation,
 
-    //#[serde(skip)]
-    //event_log: Vec<StepResponse>,
+    #[serde(skip)]
+    sim2: Sim,
+
     #[serde(skip)]
     last_step_time: f64,
 
@@ -54,6 +59,11 @@ impl Default for PollinationViewer {
             graph,
             config: ForceGraphConfig::default(),
             simulation,
+            sim2: Sim::new(StartupConfig {
+                node_count: 10,
+                seed: 1234,
+                connections: 2,
+            }),
             last_step_time: 0.,
             simulation_speed: 1.,
             per_step: 1,
@@ -111,6 +121,14 @@ impl PollinationViewer {
             self.last_step_time = time;
 
             for _ in 0..self.per_step {
+                self.sim2.step(&StepConfig {
+                    timeout_propagativity: 10,
+                    timeout_heartbeat: 10,
+                    timeout_reap: 10,
+                    rand_robin_count: 2,
+                })
+
+                /*
                 let mut simulation = std::mem::take(&mut self.simulation);
                 let res = std::panic::catch_unwind(|| {
                     let res = simulation.step(&SimConfig {
@@ -130,6 +148,7 @@ impl PollinationViewer {
                         self.reset();
                     }
                 }
+                */
 
                 // TODO: Do something with res, log it??
             }
