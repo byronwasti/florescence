@@ -10,7 +10,7 @@ use std::{
 use uuid::Uuid;
 
 pub struct Sim {
-    history: History,
+    pub history: History,
     nodes: Graph<SimNode, ()>,
     rng: StdRng,
 }
@@ -50,40 +50,18 @@ impl Sim {
         config: &StepConfig,
         node: NodeIndex,
     ) -> Option<HistoricalRecord> {
-        let mut active_node = self
+        let mut node = self
             .nodes
             .node_weight_mut(node)
             .expect("Can't find Node associated with NodexIndex");
-        let saved_core = active_node.inner.clone();
+        let saved_core = node.inner.clone();
 
-        let mut node = std::mem::take(active_node);
-        let seed = self.rng.random();
-        let wall_time = self.history.wall_time();
-        let res = std::panic::catch_unwind(|| {
-            let mut reseeded = StdRng::seed_from_u64(seed);
-            let res = node.step(&mut reseeded, wall_time, &config);
-            (res, node)
-        });
+        let event = node.step(&mut self.rng, self.history.wall_time(), &config);
 
-        match res {
-            Ok((event, node)) => {
-                *active_node = node;
-
-                event.map(|event| HistoricalRecord {
-                    node: saved_core,
-                    event,
-                })
-            }
-            Err(err) => {
-                println!("Caught a panic: {err:?}");
-                Some(HistoricalRecord {
-                    node: saved_core,
-                    event: HistoricalEvent::Panic {
-                        err: format!("{err:?}"),
-                    },
-                })
-            }
-        }
+        event.map(|event| HistoricalRecord {
+            node: saved_core,
+            event,
+        })
     }
 
     fn random_ordering(&mut self) -> Vec<NodeIndex> {
@@ -215,7 +193,7 @@ impl SimNode {
             }
         }
 
-        if time - self.last_heartbeat > config.timeout_heartbeat {
+        if time - self.last_heartbeat > config.timeout_heartbeat || self.last_heartbeat == 0 {
             self.last_heartbeat = time;
 
             if let Some(msg) = self.inner.msg_heartbeat() {
@@ -279,6 +257,7 @@ impl Ord for Mail {
 
 /** History **/
 
+#[derive(Debug)]
 struct History {
     records: Vec<Option<HistoricalRecord>>,
     wall_time: u64,
@@ -318,11 +297,13 @@ impl Default for History {
     }
 }
 
+#[derive(Debug)]
 pub struct HistoricalRecord {
     pub node: PollinationNode<NodeIndex>,
     pub event: HistoricalEvent,
 }
 
+#[derive(Debug)]
 pub enum HistoricalEvent {
     NewMember {
         msg: PollinationMessage,
@@ -362,5 +343,7 @@ mod tests {
         });
 
         sim.step(&StepConfig::default());
+
+        println!("History: {:?}", sim.history);
     }
 }
