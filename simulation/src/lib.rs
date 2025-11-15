@@ -1,4 +1,5 @@
-//mod old_sim;
 mod sim;
+mod traits;
 
 pub use sim::*;
+pub use traits::*;
