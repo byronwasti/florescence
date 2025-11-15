@@ -257,12 +257,17 @@ impl Ord for Mail {
 
 /** History **/
 
+/// Everything preceding the current moment in time of the Simulation is
+/// contained in the History. There are two timestamps which are used, to allow
+/// for parallel execution and correct timeout behavior. The `event_time` is
+/// derived from the length of events preceding. The `wall_time` is for having
+/// parallel execution and timeouts work nicely together.
 #[derive(Debug)]
-struct History {
+pub struct History {
     records: Vec<Option<HistoricalRecord>>,
     wall_time: u64,
     nodes_index: HashMap<NodeIndex, Vec<usize>>,
-    stats: Stats,
+    //stats: Stats,
 }
 
 impl History {
@@ -273,11 +278,14 @@ impl History {
 
     /// Returns the wall time
     ///
-    /// ie. a way to provide timeouts
+    /// The wall
     pub fn wall_time(&self) -> u64 {
         self.wall_time
     }
 
+    /// Record a new event.
+    /// Increments the `event_time` always.
+    /// Increments the `.wall_time` when given `None`.
     pub fn record(&mut self, record: Option<HistoricalRecord>) {
         if record.is_none() {
             self.wall_time += 1;
@@ -292,7 +300,7 @@ impl Default for History {
             records: vec![],
             wall_time: 0,
             nodes_index: HashMap::new(),
-            stats: Stats::default(),
+            //stats: Stats::default(),
         }
     }
 }
