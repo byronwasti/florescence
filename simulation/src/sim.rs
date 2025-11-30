@@ -8,19 +8,21 @@ use std::{
     collections::{BinaryHeap, HashMap, HashSet},
 };
 use uuid::Uuid;
+use thiserror::Error;
 
 use crate::history::*;
 use crate::sim_node::*;
 use crate::traits::*;
 
 pub struct Sim<S: Simulee> {
-    pub history: History<S::Snapshot, S::Event>,
+    pub history: History<S::Snapshot, S::HistoricalEvent>,
     nodes: Graph<SimNode<S>, ()>,
     rng: StdRng,
+    panic_msg: Option<String>,
 }
 
 impl<S: Simulee> Sim<S> {
-    pub fn new(config: StartupConfig) -> Self {
+    pub fn new(config: Config<S::Config>) -> Self {
         let history = History::default();
         let mut rng = StdRng::seed_from_u64(config.seed);
         //let nodes = new_graph(&mut rng, config.node_count, config.connections);
@@ -30,29 +32,53 @@ impl<S: Simulee> Sim<S> {
             history,
             rng,
             nodes,
+            panic_msg: None,
         }
     }
 
-    pub fn step(&mut self, config: &StepConfig) {
-        /*
-        let record = self.step_inner(&config);
+    pub fn step(&mut self, config: &Config<S::Config>) -> Result<(), SimError> {
+        if let Some(panicMsg) = &self.panic_msg {
+            return Err(SimError::Panic(panicMsg.clone()))
+        }
+        let record = self.step_inner(config)?;
         self.history.record(record);
-        */
+
+        Ok(())
+    }
+
+    fn step_inner(
+        &mut self,
+        config: &Config<S::Config>,
+    ) -> Result<Option<HistoricalRecord<S::Snapshot, S::HistoricalEvent>>, SimError> {
+        let nodes = self.random_ordering();
+        for node in nodes {
+            let node = self.nodes.node_weight_mut(node).expect("Node to exist");
+            match node.step(&mut self.rng, self.history.wall_time(), &config.custom) {
+                Ok(record) => {
+                    return Ok(Some(record));
+                }
+                Err(SimNodeError::NoAction) => {
+                    continue
+                }
+                Err(err) => {
+                    let err_msg = err.to_string();
+                    self.panic_msg = Some(err_msg.clone());
+                    return Err(SimError::Panic(err_msg));
+                }
+            }
+            /*
+            println!("Stepping node_id={node:?}");
+            let node = self.nodes.node_weight_mut(node).expect("Node to exist");
+            if let Some(record) = node.step(config) {
+                return Some(record);
+            }
+            */
+        }
+
+        Ok(None)
     }
 
     /*
-    fn step_inner(&mut self, config: &StepConfig) -> Option<HistoricalRecord<S::Snapshot, S::Event>> {
-        let nodes = self.random_ordering();
-        for node in nodes {
-            println!("Stepping node_id={node:?}");
-            if let Some(record) = self.step_node_safely(config, node) {
-                return Some(record);
-            }
-        }
-
-        None
-    }
-
     fn step_node_safely(
         &mut self,
         config: &StepConfig,
@@ -120,6 +146,13 @@ fn new_graph<R: Rng + ?Sized>(
 
 /** Configs **/
 
+pub struct Config<C> {
+    pub node_count: usize,
+    pub seed: u64,
+    pub custom: C,
+}
+
+/*
 pub struct StartupConfig {
     pub node_count: usize,
     pub seed: u64,
@@ -144,6 +177,13 @@ impl Default for StepConfig {
             rand_robin_count: 2,
         }
     }
+}
+*/
+
+#[derive(Debug, Error)]
+enum SimError {
+    #[error("Panic occurred: {0}")]
+    Panic(String),
 }
 
 #[derive(Debug, Default)]

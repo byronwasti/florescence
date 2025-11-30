@@ -3,5 +3,6 @@
 mod app;
 mod simulation;
 mod widgets;
+mod sim_runner;
 
 pub use app::PollinationViewer;

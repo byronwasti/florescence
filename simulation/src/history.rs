@@ -7,14 +7,14 @@ use std::collections::HashMap;
 /// derived from the length of events preceding. The `wall_time` is for having
 /// parallel execution and timeouts work nicely together.
 #[derive(Debug)]
-pub struct History<Snapshot, Event> {
-    records: Vec<Option<HistoricalRecord<Snapshot, Event>>>,
+pub struct History<Snapshot, HistoricalEvent> {
+    records: Vec<Option<HistoricalRecord<Snapshot, HistoricalEvent>>>,
     wall_time: u64,
     nodes_index: HashMap<NodeIndex, Vec<usize>>,
     //stats: Stats,
 }
 
-impl<Snapshot, Event> History<Snapshot, Event> {
+impl<Snapshot, HistoricalEvent> History<Snapshot, HistoricalEvent> {
     /// Returns the event time
     pub fn time(&self) -> u64 {
         self.records.len() as u64
@@ -30,7 +30,7 @@ impl<Snapshot, Event> History<Snapshot, Event> {
     /// Record a new event.
     /// Increments the `event_time` always.
     /// Increments the `.wall_time` when given `None`.
-    pub fn record(&mut self, record: Option<HistoricalRecord<Snapshot, Event>>) {
+    pub fn record(&mut self, record: Option<HistoricalRecord<Snapshot, HistoricalEvent>>) {
         if record.is_none() {
             self.wall_time += 1;
         }
@@ -50,9 +50,9 @@ impl<S, E> Default for History<S, E> {
 }
 
 #[derive(Debug)]
-pub struct HistoricalRecord<Snapshot, Event> {
+pub struct HistoricalRecord<Snapshot, HistoricalEvent> {
     pub node_snapshot: Snapshot,
-    pub event: Event,
+    pub event: HistoricalEvent,
 }
 
 /*

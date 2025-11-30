@@ -8,20 +8,16 @@ pub struct SimNode<S: Simulee> {
     simulee: Option<S>,
 }
 
-impl<S> SimNode<S>
-where
-    S: Simulee + panic::UnwindSafe,
-    S::Event: panic::UnwindSafe,
-    S::Message: panic::UnwindSafe,
-{
+impl<S: Simulee> SimNode<S> {
     pub fn step<R: Rng + ?Sized>(
         &mut self,
         rng: &mut R,
         wall_time: u64,
+        config: &S::Config,
     ) -> Result<HistoricalRecord<S::Snapshot, S::HistoricalEvent>, SimNodeError> {
-        let event = self
-            .select_event(rng, wall_time)
-            .ok_or(SimNodeError::NoEvent)?;
+        let action = self
+            .select_action(rng, wall_time, config)
+            .ok_or(SimNodeError::NoAction)?;
 
         let snapshot = self
             .simulee
@@ -29,7 +25,7 @@ where
             .expect("No simulee available.")
             .snapshot();
 
-        let mail = if event.take_mail() {
+        let mail = if action.takes_mail() {
             self.mailbox.pop()
         } else {
             None
@@ -38,9 +34,11 @@ where
         let message = mail.map(|x| x.msg.clone());
 
         let mut simulee = self.simulee.take().expect("No simulee available.");
+        // XXX: Don't necessarily need a clone here. I doubt it matters.
+        let config = config.clone();
 
-        let (historical_event, simulee) = panic::catch_unwind(|| {
-            let res = simulee.step(event, message, wall_time);
+        let (historical_event, simulee) = panic::catch_unwind(move || {
+            let res = simulee.step(action, message, wall_time, &config);
             (res, simulee)
         })
         .map_err(|err| {
@@ -60,15 +58,20 @@ where
         })
     }
 
-    fn select_event<R: Rng + ?Sized>(&self, rng: &mut R, wall_time: u64) -> Option<S::Event> {
-        let events = self
+    fn select_action<R: Rng + ?Sized>(
+        &self,
+        rng: &mut R,
+        wall_time: u64,
+        config: &S::Config,
+    ) -> Option<S::Action> {
+        let actions = self
             .simulee
             .as_ref()
             .expect("No simulee available.")
-            .events(wall_time, !self.mailbox.is_empty());
-        for (event, probability) in events {
+            .list_actions(wall_time, !self.mailbox.is_empty(), config);
+        for (action, probability) in actions {
             if rng.random_bool(probability) {
-                return Some(event);
+                return Some(action);
             }
         }
 
@@ -77,9 +80,9 @@ where
 }
 
 #[derive(Debug, Error)]
-enum SimNodeError {
-    #[error("No event")]
-    NoEvent,
+pub enum SimNodeError {
+    #[error("No action")]
+    NoAction,
 
     #[error("Node hit a panic: {0}")]
     Panic(String),
