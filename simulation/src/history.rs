@@ -29,7 +29,7 @@ impl<Snapshot, HistoricalEvent> History<Snapshot, HistoricalEvent> {
 
     /// Record a new event.
     /// Increments the `event_time` always.
-    /// Increments the `.wall_time` when given `None`.
+    /// Increments the `wall_time` when given `None`.
     pub fn record(&mut self, record: Option<HistoricalRecord<Snapshot, HistoricalEvent>>) {
         if record.is_none() {
             self.wall_time += 1;

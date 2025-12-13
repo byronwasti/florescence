@@ -1,4 +1,4 @@
-use petgraph::{Graph, graph::NodeIndex};
+use petgraph::{graph::NodeIndex, stable_graph::StableGraph};
 use pollination::{
     PollinationError, PollinationMessage, PollinationNode, PollinationResponse, Topic,
 };
@@ -7,26 +7,24 @@ use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap, HashSet},
 };
-use uuid::Uuid;
 use thiserror::Error;
+use uuid::Uuid;
 
-use crate::history::*;
-use crate::sim_node::*;
-use crate::traits::*;
+use crate::{config::*, history::*, sim_node::*, traits::*};
 
 pub struct Sim<S: Simulee> {
     pub history: History<S::Snapshot, S::HistoricalEvent>,
-    nodes: Graph<SimNode<S>, ()>,
+    // TODO: The usage of PetGraph for this is entirely unnecessary
+    nodes: StableGraph<SimNode<S>, ()>,
     rng: StdRng,
     panic_msg: Option<String>,
 }
 
 impl<S: Simulee> Sim<S> {
-    pub fn new(config: Config<S::Config>) -> Self {
+    pub fn new(config: &Config<S::Config>) -> Self {
         let history = History::default();
         let mut rng = StdRng::seed_from_u64(config.seed);
-        //let nodes = new_graph(&mut rng, config.node_count, config.connections);
-        let nodes = todo!();
+        let nodes = new_graph(&mut rng, config);
 
         Self {
             history,
@@ -38,7 +36,7 @@ impl<S: Simulee> Sim<S> {
 
     pub fn step(&mut self, config: &Config<S::Config>) -> Result<(), SimError> {
         if let Some(panicMsg) = &self.panic_msg {
-            return Err(SimError::Panic(panicMsg.clone()))
+            return Err(SimError::Panic(panicMsg.clone()));
         }
         let record = self.step_inner(config)?;
         self.history.record(record);
@@ -57,47 +55,17 @@ impl<S: Simulee> Sim<S> {
                 Ok(record) => {
                     return Ok(Some(record));
                 }
-                Err(SimNodeError::NoAction) => {
-                    continue
-                }
+                Err(SimNodeError::NoAction) => continue,
                 Err(err) => {
                     let err_msg = err.to_string();
                     self.panic_msg = Some(err_msg.clone());
                     return Err(SimError::Panic(err_msg));
                 }
             }
-            /*
-            println!("Stepping node_id={node:?}");
-            let node = self.nodes.node_weight_mut(node).expect("Node to exist");
-            if let Some(record) = node.step(config) {
-                return Some(record);
-            }
-            */
         }
 
         Ok(None)
     }
-
-    /*
-    fn step_node_safely(
-        &mut self,
-        config: &StepConfig,
-        node: NodeIndex,
-    ) -> Option<HistoricalRecord<S::Snapshot, S::Event>> {
-        let mut node = self
-            .nodes
-            .node_weight_mut(node)
-            .expect("Can't find Node associated with NodexIndex");
-        //let snapshot = node.snapshot();
-
-        //let event = node.step(&mut self.rng, self.history.wall_time(), &config);
-
-        event.map(|event| HistoricalRecord {
-            node: todo!(),
-            event,
-        })
-    }
-    */
 
     fn random_ordering(&mut self) -> Vec<NodeIndex> {
         let mut node_ids: Vec<_> = (0..self.nodes.node_count())
@@ -108,15 +76,15 @@ impl<S: Simulee> Sim<S> {
     }
 }
 
-/*
-fn new_graph<R: Rng + ?Sized>(
+fn new_graph<R: Rng + ?Sized, S: Simulee>(
     rng: &mut R,
-    node_count: usize,
-    connections: usize,
-) -> Graph<SimNode, ()> {
-    let mut nodes = Graph::new();
+    config: &Config<S::Config>,
+) -> StableGraph<SimNode<S>, ()> {
+    let mut nodes = StableGraph::new();
 
-    for id in 0..node_count {
+    for index in 0..config.node_count {
+        nodes.add_node(SimNode::new(rng, config, index));
+        /*
         nodes.add_node(SimNode {
             inner: PollinationNode::new(
                 Uuid::from_u128(rng.random()),
@@ -128,8 +96,10 @@ fn new_graph<R: Rng + ?Sized>(
             last_propagation: 0,
             last_reap: 0,
         });
+        */
     }
 
+    /*
     for i in 0..node_count {
         for _ in 0..connections {
             let j = rng.random_range(0..node_count - 1);
@@ -139,46 +109,10 @@ fn new_graph<R: Rng + ?Sized>(
             nodes.add_edge(i.into(), j.into(), ());
         }
     }
+    */
 
     nodes
 }
-*/
-
-/** Configs **/
-
-pub struct Config<C> {
-    pub node_count: usize,
-    pub seed: u64,
-    pub custom: C,
-}
-
-/*
-pub struct StartupConfig {
-    pub node_count: usize,
-    pub seed: u64,
-    pub connections: usize,
-}
-
-pub struct StepConfig {
-    pub timeout_propagativity: u64,
-    pub timeout_heartbeat: u64,
-    pub timeout_reap: u64,
-
-    /// Only used if connections == 0
-    pub rand_robin_count: usize,
-}
-
-impl Default for StepConfig {
-    fn default() -> StepConfig {
-        StepConfig {
-            timeout_propagativity: 13,
-            timeout_heartbeat: 5,
-            timeout_reap: 8,
-            rand_robin_count: 2,
-        }
-    }
-}
-*/
 
 #[derive(Debug, Error)]
 enum SimError {
@@ -191,20 +125,13 @@ struct Stats {
     time_to_convergence: Option<u64>,
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_step() {
-        let mut sim = Sim::new(StartupConfig {
-            node_count: 5,
-            seed: 123,
-            connections: 2,
-        });
-
-        sim.step(&StepConfig::default());
-
-        println!("History: {:?}", sim.history);
     }
 }
+*/

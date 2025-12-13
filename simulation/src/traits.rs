@@ -1,3 +1,4 @@
+use crate::config::Config;
 use std::panic::UnwindSafe;
 
 ///  `Simulee` is each individual node in the simulation.
@@ -7,6 +8,8 @@ pub trait Simulee: UnwindSafe {
     type Message: Clone + UnwindSafe;
     type Action: Action + UnwindSafe;
     type HistoricalEvent;
+
+    fn new(config: &Config<Self::Config>, index: usize, rng: u64) -> Self;
 
     /// Returns an Iterator over (event, probability). The probabilities
     /// do not need to add up to 1., and will be evaluated in-order which necessarily introduces

@@ -1,4 +1,4 @@
-use crate::{history::*, mail::*, traits::*};
+use crate::{config::Config, history::*, mail::*, traits::*};
 use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
 use std::{any::Any, cmp::Ordering, collections::BinaryHeap, panic};
 use thiserror::Error;
@@ -9,6 +9,17 @@ pub struct SimNode<S: Simulee> {
 }
 
 impl<S: Simulee> SimNode<S> {
+    pub fn new<R: Rng + ?Sized>(
+        rng: &mut R,
+        config: &Config<S::Config>,
+        index: usize,
+    ) -> SimNode<S> {
+        Self {
+            mailbox: BinaryHeap::new(),
+            simulee: Some(S::new(config, index, rng.random())),
+        }
+    }
+
     pub fn step<R: Rng + ?Sized>(
         &mut self,
         rng: &mut R,
