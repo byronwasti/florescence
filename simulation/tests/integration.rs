@@ -3,6 +3,8 @@ use pollination_simulation::*;
 #[derive(Debug, Clone)]
 struct TestNode {
     id: usize,
+    handled_messages: u64,
+    sent_messages: u64,
 }
 
 impl Simulee for TestNode {
@@ -22,17 +24,34 @@ impl Simulee for TestNode {
         mail_available: bool,
         config: &Self::Config,
     ) -> impl Iterator<Item = (Self::Action, f64)> {
-        vec![].into_iter()
+        if mail_available {
+            vec![
+                (TestAction::TakeMessage, 0.75),
+                (TestAction::SendMessage, 0.3),
+            ].into_iter()
+        } else {
+            vec![
+                (TestAction::SendMessage, 0.75),
+            ].into_iter()
+        }
     }
 
     fn step(
         &mut self,
-        event: Self::Action,
+        action: Self::Action,
         message: Option<Self::Message>,
         wall_time: u64,
         config: &Self::Config,
     ) -> Self::HistoricalEvent {
-        ()
+        match event {
+            TestAction::TakeMessage => {
+                let _msg = message.expect("Expect message");
+                self.handled_messages += 1;
+            }
+            TestAction::SendMessage => {
+                self.sent_messages += 1;
+            }
+        }
     }
 
     fn snapshot(&self) -> Self::Snapshot {
@@ -41,15 +60,16 @@ impl Simulee for TestNode {
 }
 
 enum TestAction {
-    One,
-    Two,
+    TakeMessage,
+    SendMessage,
 }
 
 impl Action for TestAction {
     fn takes_mail(&self) -> bool {
+        use TestAction::*;
         match &self {
-            Self::One => true,
-            Self::Two => false,
+            TakeMessage => true,
+            SendMessage => false,
         }
     }
 }

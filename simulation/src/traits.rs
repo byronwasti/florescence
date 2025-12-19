@@ -23,7 +23,7 @@ pub trait Simulee: UnwindSafe {
 
     fn step(
         &mut self,
-        event: Self::Action,
+        action: Self::Action,
         message: Option<Self::Message>,
         wall_time: u64,
         config: &Self::Config,
