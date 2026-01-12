@@ -1,10 +1,16 @@
-use crate::{config::Config, history::*, mail::*, traits::*};
+use crate::{
+    config::Config,
+    history::*,
+    mailbox::{Delivery, Mail, Mailbox},
+    traits::*,
+};
+use petgraph::graph::NodeIndex;
 use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
-use std::{any::Any, cmp::Ordering, collections::BinaryHeap, panic};
+use std::{any::Any, cmp::Ordering, panic};
 use thiserror::Error;
 
 pub struct SimNode<S: Simulee> {
-    mailbox: BinaryHeap<Mail<S::Message>>,
+    mailbox: Mailbox<S::Message>,
     simulee: Option<S>,
 }
 
@@ -15,8 +21,8 @@ impl<S: Simulee> SimNode<S> {
         index: usize,
     ) -> SimNode<S> {
         Self {
-            mailbox: BinaryHeap::new(),
-            simulee: Some(S::new(config, index, rng.random())),
+            mailbox: Mailbox::new(),
+            simulee: Some(S::new(rng, config, NodeIndex::new(index))),
         }
     }
 
@@ -24,33 +30,24 @@ impl<S: Simulee> SimNode<S> {
         &mut self,
         rng: &mut R,
         wall_time: u64,
-        config: &S::Config,
-    ) -> Result<HistoricalRecord<S::Snapshot, S::HistoricalEvent>, SimNodeError> {
-        let action = self
-            .select_action(rng, wall_time, config)
-            .ok_or(SimNodeError::NoAction)?;
-
+        config: &Config<S::Config>,
+    ) -> Result<HistoricalRecord<S>, SimNodeError> {
+        // Before doing anything, we want to snapshot the node as-is.
         let snapshot = self
             .simulee
             .as_ref()
             .expect("No simulee available.")
-            .snapshot();
+            .clone();
 
-        let mail = if action.takes_mail() {
-            self.mailbox.pop()
-        } else {
-            None
-        };
-
-        let message = mail.map(|x| x.msg.clone());
-
+        let mut delivery = self.mailbox.get_delivery();
         let mut simulee = self.simulee.take().expect("No simulee available.");
-        // XXX: Don't necessarily need a clone here. I doubt it matters.
         let config = config.clone();
-
-        let (historical_event, simulee) = panic::catch_unwind(move || {
-            let res = simulee.step(action, message, wall_time, &config);
-            (res, simulee)
+        let seed = rng.random();
+        let (event, msgs_out, simulee, delivery) = panic::catch_unwind(move || {
+            // Can't pass an Rng across the unwind boundary, so just reseed a new one.
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (event, msgs_out) = simulee.step(&mut rng, &config, wall_time, &mut delivery);
+            (event, msgs_out, simulee, delivery)
         })
         .map_err(|err| {
             if let Some(err) = err.downcast_ref::<&str>() {
@@ -63,12 +60,28 @@ impl<S: Simulee> SimNode<S> {
         })?;
         self.simulee = Some(simulee);
 
+        let msg_in = if let Some(delivery) = delivery {
+            let delivered = delivery.delivered();
+            let mail = delivery.take_final();
+            if delivered {
+                Some(mail)
+            } else {
+                self.mailbox.push(mail);
+                None
+            }
+        } else {
+            None
+        };
+
         Ok(HistoricalRecord {
-            node_snapshot: snapshot,
-            event: historical_event,
+            snapshot,
+            event,
+            msg_in,
+            msgs_out,
         })
     }
 
+    /*
     fn select_action<R: Rng + ?Sized>(
         &self,
         rng: &mut R,
@@ -88,6 +101,7 @@ impl<S: Simulee> SimNode<S> {
 
         None
     }
+    */
 }
 
 #[derive(Debug, Error)]

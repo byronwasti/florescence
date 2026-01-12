@@ -1,4 +1,5 @@
 #[non_exhaustive]
+#[derive(Debug, Clone)]
 pub struct Config<C> {
     pub node_count: usize,
     pub seed: u64,

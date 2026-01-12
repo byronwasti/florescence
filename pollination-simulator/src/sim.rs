@@ -1,7 +1,4 @@
 use petgraph::{graph::NodeIndex, stable_graph::StableGraph};
-use pollination::{
-    PollinationError, PollinationMessage, PollinationNode, PollinationResponse, Topic,
-};
 use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
 use std::{
     cmp::Ordering,
@@ -13,7 +10,7 @@ use uuid::Uuid;
 use crate::{config::*, history::*, sim_node::*, traits::*};
 
 pub struct Sim<S: Simulee> {
-    pub history: History<S::Snapshot, S::HistoricalEvent>,
+    pub history: History<S>,
     // TODO: The usage of PetGraph for this is entirely unnecessary
     nodes: StableGraph<SimNode<S>, ()>,
     rng: StdRng,
@@ -47,11 +44,11 @@ impl<S: Simulee> Sim<S> {
     fn step_inner(
         &mut self,
         config: &Config<S::Config>,
-    ) -> Result<Option<HistoricalRecord<S::Snapshot, S::HistoricalEvent>>, SimError> {
+    ) -> Result<Option<HistoricalRecord<S>>, SimError> {
         let nodes = self.random_ordering();
         for node in nodes {
             let node = self.nodes.node_weight_mut(node).expect("Node to exist");
-            match node.step(&mut self.rng, self.history.wall_time(), &config.custom) {
+            match node.step(&mut self.rng, self.history.wall_time(), &config) {
                 Ok(record) => {
                     return Ok(Some(record));
                 }

@@ -28,11 +28,10 @@ impl Simulee for TestNode {
             vec![
                 (TestAction::TakeMessage, 0.75),
                 (TestAction::SendMessage, 0.3),
-            ].into_iter()
+            ]
+            .into_iter()
         } else {
-            vec![
-                (TestAction::SendMessage, 0.75),
-            ].into_iter()
+            vec![(TestAction::SendMessage, 0.75)].into_iter()
         }
     }
 

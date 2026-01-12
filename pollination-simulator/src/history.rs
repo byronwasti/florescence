@@ -1,3 +1,4 @@
+use crate::{mailbox::Mail, traits::Simulee};
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 
@@ -7,14 +8,14 @@ use std::collections::HashMap;
 /// derived from the length of events preceding. The `wall_time` is for having
 /// parallel execution and timeouts work nicely together.
 #[derive(Debug)]
-pub struct History<Snapshot, HistoricalEvent> {
-    records: Vec<Option<HistoricalRecord<Snapshot, HistoricalEvent>>>,
+pub struct History<S: Simulee> {
+    records: Vec<Option<HistoricalRecord<S>>>,
     wall_time: u64,
     nodes_index: HashMap<NodeIndex, Vec<usize>>,
     //stats: Stats,
 }
 
-impl<Snapshot, HistoricalEvent> History<Snapshot, HistoricalEvent> {
+impl<S: Simulee> History<S> {
     /// Returns the event time
     pub fn time(&self) -> u64 {
         self.records.len() as u64
@@ -30,7 +31,7 @@ impl<Snapshot, HistoricalEvent> History<Snapshot, HistoricalEvent> {
     /// Record a new event.
     /// Increments the `event_time` always.
     /// Increments the `wall_time` when given `None`.
-    pub fn record(&mut self, record: Option<HistoricalRecord<Snapshot, HistoricalEvent>>) {
+    pub fn record(&mut self, record: Option<HistoricalRecord<S>>) {
         if record.is_none() {
             self.wall_time += 1;
         }
@@ -38,7 +39,7 @@ impl<Snapshot, HistoricalEvent> History<Snapshot, HistoricalEvent> {
     }
 }
 
-impl<S, E> Default for History<S, E> {
+impl<S: Simulee> Default for History<S> {
     fn default() -> Self {
         Self {
             records: vec![],
@@ -50,9 +51,11 @@ impl<S, E> Default for History<S, E> {
 }
 
 #[derive(Debug)]
-pub struct HistoricalRecord<Snapshot, HistoricalEvent> {
-    pub node_snapshot: Snapshot,
-    pub event: HistoricalEvent,
+pub struct HistoricalRecord<S: Simulee> {
+    pub snapshot: S,
+    pub event: S::HistoricalEvent,
+    pub msg_in: Option<Mail<S::Message>>,
+    pub msgs_out: Vec<(NodeIndex, S::Message)>,
 }
 
 /*

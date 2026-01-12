@@ -362,9 +362,12 @@ dependencies = [
 [[package]]
 name = "pollination-simulation"
 version = "0.1.0"
+
+[[package]]
+name = "pollination-simulator"
+version = "0.1.0"
 dependencies = [
  "petgraph",
- "pollination",
  "rand",
  "serde",
  "thiserror",

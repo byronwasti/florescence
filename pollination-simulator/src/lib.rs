@@ -1,6 +1,6 @@
 mod config;
 pub mod history;
-mod mail;
+mod mailbox;
 mod sim;
 mod sim_node;
 mod traits;
