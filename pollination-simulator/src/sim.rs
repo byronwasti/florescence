@@ -10,40 +10,45 @@ pub struct Sim<S: Simulee> {
     nodes: StableGraph<SimNode<S>, ()>,
     rng: StdRng,
     panic_msg: Option<String>,
+    config: Config<S::Config>,
 }
 
 impl<S: Simulee> Sim<S> {
-    pub fn new(config: &Config<S::Config>) -> Self {
+    pub fn new(config: Config<S::Config>) -> Self {
         let history = History::default();
         let mut rng = StdRng::seed_from_u64(config.seed);
-        let nodes = new_graph(&mut rng, config);
+        let nodes = new_graph(&mut rng, &config);
 
         Self {
             history,
             rng,
             nodes,
             panic_msg: None,
+            config,
         }
     }
 
-    pub fn step(&mut self, config: &Config<S::Config>) -> Result<(), SimError> {
+    pub fn set_config(&mut self, config: Config<S::Config>) {
+        self.config = config;
+        // TODO: Reset the attributes that need resetting
+        todo!();
+    }
+
+    pub fn step(&mut self) -> Result<(), SimError> {
         if let Some(panic_msg) = &self.panic_msg {
             return Err(SimError::Panic(panic_msg.clone()));
         }
-        let record = self.step_inner(config)?;
+        let record = self.step_inner()?;
         self.history.record(record);
 
         Ok(())
     }
 
-    fn step_inner(
-        &mut self,
-        config: &Config<S::Config>,
-    ) -> Result<Option<HistoricalRecord<S>>, SimError> {
+    fn step_inner(&mut self) -> Result<Option<HistoricalRecord<S>>, SimError> {
         let nodes = self.random_ordering();
         for node in nodes {
             let node = self.nodes.node_weight_mut(node).expect("Node to exist");
-            match node.step(&mut self.rng, self.history.wall_time(), config) {
+            match node.step(&mut self.rng, self.history.wall_time(), &self.config) {
                 Ok(record) => {
                     return Ok(Some(record));
                 }
@@ -63,6 +68,14 @@ impl<S: Simulee> Sim<S> {
         let mut node_ids: Vec<_> = (0..self.nodes.node_count()).map(NodeIndex::new).collect();
         node_ids.shuffle(&mut self.rng);
         node_ids
+    }
+
+    pub fn history(&self) -> &History<S> {
+        &self.history
+    }
+
+    pub fn nodes(&self) -> impl Iterator<Item = &SimNode<S>> {
+        self.nodes.node_weights()
     }
 }
 

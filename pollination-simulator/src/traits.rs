@@ -9,7 +9,7 @@ pub trait Simulee: Clone + UnwindSafe {
     type Message: Debug + Clone + UnwindSafe;
     type HistoricalEvent: Debug;
 
-    fn new<R: Rng + ?Sized>(rng: &mut R, config: &Config<Self::Config>, addr: NodeIndex) -> Self;
+    fn new<R: Rng + ?Sized>(rng: &mut R, config: &Config<Self::Config>, id: NodeIndex) -> Self;
 
     #[allow(clippy::type_complexity)]
     fn step<R: Rng + ?Sized>(

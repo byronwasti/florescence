@@ -27,10 +27,14 @@ impl<S: Simulee> History<S> {
         self.wall_time
     }
 
-    /// Record a new event.
+    pub fn records(&self) -> &Vec<Option<HistoricalRecord<S>>> {
+        &self.records
+    }
+
+    /// Record a record. English is fun.
     /// Increments the `event_time` always.
     /// Increments the `wall_time` when given `None`.
-    pub fn record(&mut self, record: Option<HistoricalRecord<S>>) {
+    pub(crate) fn record(&mut self, record: Option<HistoricalRecord<S>>) {
         if let Some(record) = record.as_ref() {
             self.index.insert(record.id, self.records.len() as u64)
         } else {

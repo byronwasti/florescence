@@ -1,10 +1,12 @@
-mod config;
+pub mod config;
 pub mod history;
-mod mailbox;
-mod sim;
-mod sim_node;
-mod traits;
+pub mod mailbox;
+pub mod sim;
+pub mod sim_node;
+pub mod traits;
 
-pub use config::*;
-pub use sim::*;
-pub use traits::*;
+pub use config::Config;
+pub use mailbox::{Delivery, Mail};
+pub use petgraph::graph::NodeIndex;
+pub use sim::{Sim, SimError};
+pub use traits::Simulee;

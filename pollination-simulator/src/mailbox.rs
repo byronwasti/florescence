@@ -2,6 +2,7 @@ use petgraph::graph::NodeIndex;
 use rand::Rng;
 use std::{cmp::Ordering, collections::BinaryHeap};
 
+#[derive(Debug)]
 pub struct Mailbox<Message> {
     inner: BinaryHeap<Mail<Message>>,
 }

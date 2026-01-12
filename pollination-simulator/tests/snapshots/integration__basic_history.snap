@@ -1,0 +1,71 @@
+---
+source: pollination-simulator/tests/integration.rs
+expression: nodes
+---
+[
+    SimNode {
+        id: NodeIndex(0),
+        mailbox: Mailbox {
+            inner: [],
+        },
+        simulee: Some(
+            TestNode {
+                id: NodeIndex(0),
+                handled_messages: 0,
+                sent_messages: 0,
+            },
+        ),
+    },
+    SimNode {
+        id: NodeIndex(1),
+        mailbox: Mailbox {
+            inner: [],
+        },
+        simulee: Some(
+            TestNode {
+                id: NodeIndex(1),
+                handled_messages: 0,
+                sent_messages: 0,
+            },
+        ),
+    },
+    SimNode {
+        id: NodeIndex(2),
+        mailbox: Mailbox {
+            inner: [],
+        },
+        simulee: Some(
+            TestNode {
+                id: NodeIndex(2),
+                handled_messages: 0,
+                sent_messages: 0,
+            },
+        ),
+    },
+    SimNode {
+        id: NodeIndex(3),
+        mailbox: Mailbox {
+            inner: [],
+        },
+        simulee: Some(
+            TestNode {
+                id: NodeIndex(3),
+                handled_messages: 0,
+                sent_messages: 0,
+            },
+        ),
+    },
+    SimNode {
+        id: NodeIndex(4),
+        mailbox: Mailbox {
+            inner: [],
+        },
+        simulee: Some(
+            TestNode {
+                id: NodeIndex(4),
+                handled_messages: 0,
+                sent_messages: 0,
+            },
+        ),
+    },
+]

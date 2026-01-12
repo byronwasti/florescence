@@ -4,8 +4,9 @@ use rand::{Rng, SeedableRng, rngs::StdRng};
 use std::panic;
 use thiserror::Error;
 
+#[derive(Debug)]
 pub struct SimNode<S: Simulee> {
-    id: NodeIndex,
+    pub id: NodeIndex,
     mailbox: Mailbox<S::Message>,
     simulee: Option<S>,
 }

@@ -1,91 +1,44 @@
-use pollination_simulation::*;
+use pollination_simulator::*;
+use rand::Rng;
 
 #[derive(Debug, Clone)]
 struct TestNode {
-    id: usize,
+    id: NodeIndex,
     handled_messages: u64,
     sent_messages: u64,
 }
 
 impl Simulee for TestNode {
-    type Snapshot = TestNode;
     type Config = ();
     type Message = ();
-    type Action = TestAction;
     type HistoricalEvent = ();
 
-    fn new(config: &Config<Self::Config>, index: usize, rng: u64) -> Self {
-        Self { id: index }
-    }
-
-    fn list_actions(
-        &self,
-        wall_time: u64,
-        mail_available: bool,
-        config: &Self::Config,
-    ) -> impl Iterator<Item = (Self::Action, f64)> {
-        if mail_available {
-            vec![
-                (TestAction::TakeMessage, 0.75),
-                (TestAction::SendMessage, 0.3),
-            ]
-            .into_iter()
-        } else {
-            vec![(TestAction::SendMessage, 0.75)].into_iter()
+    fn new<R: Rng + ?Sized>(rng: &mut R, config: &Config<Self::Config>, id: NodeIndex) -> Self {
+        Self {
+            id,
+            handled_messages: 0,
+            sent_messages: 0,
         }
     }
 
-    fn step(
+    fn step<R: Rng + ?Sized>(
         &mut self,
-        action: Self::Action,
-        message: Option<Self::Message>,
+        rng: &mut R,
+        config: &Config<Self::Config>,
         wall_time: u64,
-        config: &Self::Config,
-    ) -> Self::HistoricalEvent {
-        match event {
-            TestAction::TakeMessage => {
-                let _msg = message.expect("Expect message");
-                self.handled_messages += 1;
-            }
-            TestAction::SendMessage => {
-                self.sent_messages += 1;
-            }
-        }
-    }
-
-    fn snapshot(&self) -> Self::Snapshot {
-        self.clone()
-    }
-}
-
-enum TestAction {
-    TakeMessage,
-    SendMessage,
-}
-
-impl Action for TestAction {
-    fn takes_mail(&self) -> bool {
-        use TestAction::*;
-        match &self {
-            TakeMessage => true,
-            SendMessage => false,
-        }
+        delivery: &mut Option<Delivery<Self::Message>>,
+    ) -> Option<(Self::HistoricalEvent, Vec<(NodeIndex, Self::Message)>)> {
+        None
     }
 }
 
 #[test]
 fn basic_history() {
     let config = Config::new(5, 1234, ());
-    let mut sim: Sim<TestNode> = Sim::new(&config);
-    /*
-    let mut sim = Sim::new(StartupConfig {
-        node_count: 5,
-        seed: 123,
-        connections: 2,
-    });
+    let mut sim: Sim<TestNode> = Sim::new(config);
 
-    sim.step(&StepConfig::default());
+    let nodes: Vec<_> = sim.nodes().collect();
+    insta::assert_debug_snapshot!(nodes);
 
-    println!("History: {:?}", sim.history);
-    */
+    sim.step();
 }
