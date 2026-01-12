@@ -56,7 +56,7 @@ pub struct Mail<Message> {
 }
 
 impl<M> Mail<M> {
-    fn new<R: Rng + ?Sized>(rng: &mut R, from: NodeIndex, msg: M) -> Mail<M> {
+    pub fn new<R: Rng + ?Sized>(rng: &mut R, from: NodeIndex, msg: M) -> Mail<M> {
         Self {
             sort: rng.random(),
             from,

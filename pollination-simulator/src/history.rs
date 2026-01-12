@@ -11,8 +11,7 @@ use std::collections::HashMap;
 pub struct History<S: Simulee> {
     records: Vec<Option<HistoricalRecord<S>>>,
     wall_time: u64,
-    nodes_index: HashMap<NodeIndex, Vec<usize>>,
-    //stats: Stats,
+    index: HistoricalIndex,
 }
 
 impl<S: Simulee> History<S> {
@@ -32,7 +31,10 @@ impl<S: Simulee> History<S> {
     /// Increments the `event_time` always.
     /// Increments the `wall_time` when given `None`.
     pub fn record(&mut self, record: Option<HistoricalRecord<S>>) {
-        if record.is_none() {
+        if let Some(record) = record.as_ref() {
+            self.index.insert(record.id, self.records.len() as u64)
+        } else {
+            // No event in all of the nodes, increment the wall time.
             self.wall_time += 1;
         }
         self.records.push(record);
@@ -44,40 +46,39 @@ impl<S: Simulee> Default for History<S> {
         Self {
             records: vec![],
             wall_time: 0,
-            nodes_index: HashMap::new(),
-            //stats: Stats::default(),
+            index: HistoricalIndex::default(),
         }
     }
 }
 
 #[derive(Debug)]
 pub struct HistoricalRecord<S: Simulee> {
+    pub id: NodeIndex,
     pub snapshot: S,
     pub event: S::HistoricalEvent,
     pub msg_in: Option<Mail<S::Message>>,
     pub msgs_out: Vec<(NodeIndex, S::Message)>,
 }
 
-/*
 #[derive(Debug)]
-pub enum HistoricalEvent {
-    NewMember {
-        msg: PollinationMessage,
-    },
-    Heartbeat {
-        msg: PollinationMessage,
-    },
-    GrimTheReaper,
-    HandleMessage {
-        in_msg: PollinationMessage,
-        out_msg: Option<PollinationMessage>,
-    },
-    HandleMessageError {
-        msg: PollinationMessage,
-        error: PollinationError,
-    },
-    Panic {
-        err: String,
-    },
+struct HistoricalIndex {
+    inner: HashMap<NodeIndex, Vec<u64>>,
 }
-*/
+
+impl HistoricalIndex {
+    fn insert(&mut self, node_index: NodeIndex, event_time: u64) {
+        if let Some(v) = self.inner.get_mut(&node_index) {
+            v.push(event_time);
+        } else {
+            self.inner.insert(node_index, vec![event_time]);
+        }
+    }
+}
+
+impl Default for HistoricalIndex {
+    fn default() -> Self {
+        Self {
+            inner: HashMap::new(),
+        }
+    }
+}

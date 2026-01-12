@@ -1,11 +1,6 @@
 use petgraph::{graph::NodeIndex, stable_graph::StableGraph};
 use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
-use std::{
-    cmp::Ordering,
-    collections::{BinaryHeap, HashMap, HashSet},
-};
 use thiserror::Error;
-use uuid::Uuid;
 
 use crate::{config::*, history::*, sim_node::*, traits::*};
 
@@ -32,8 +27,8 @@ impl<S: Simulee> Sim<S> {
     }
 
     pub fn step(&mut self, config: &Config<S::Config>) -> Result<(), SimError> {
-        if let Some(panicMsg) = &self.panic_msg {
-            return Err(SimError::Panic(panicMsg.clone()));
+        if let Some(panic_msg) = &self.panic_msg {
+            return Err(SimError::Panic(panic_msg.clone()));
         }
         let record = self.step_inner(config)?;
         self.history.record(record);
@@ -80,55 +75,15 @@ fn new_graph<R: Rng + ?Sized, S: Simulee>(
     let mut nodes = StableGraph::new();
 
     for index in 0..config.node_count {
-        nodes.add_node(SimNode::new(rng, config, index));
-        /*
-        nodes.add_node(SimNode {
-            inner: PollinationNode::new(
-                Uuid::from_u128(rng.random()),
-                Topic::new("b".to_string()),
-                NodeIndex::from(id as u32),
-            ),
-            mailbox: BinaryHeap::new(),
-            last_heartbeat: 0,
-            last_propagation: 0,
-            last_reap: 0,
-        });
-        */
+        let id = NodeIndex::new(index);
+        nodes.add_node(SimNode::new(rng, config, id));
     }
-
-    /*
-    for i in 0..node_count {
-        for _ in 0..connections {
-            let j = rng.random_range(0..node_count - 1);
-            let j = if j >= i { j + 1 } else { j };
-            let (i, j) = (i as u32, j as u32);
-
-            nodes.add_edge(i.into(), j.into(), ());
-        }
-    }
-    */
 
     nodes
 }
 
 #[derive(Debug, Error)]
-enum SimError {
+pub enum SimError {
     #[error("Panic occurred: {0}")]
     Panic(String),
 }
-
-#[derive(Debug, Default)]
-struct Stats {
-    time_to_convergence: Option<u64>,
-}
-
-/*
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_step() {
-    }
-}
-*/

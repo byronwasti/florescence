@@ -17,5 +17,5 @@ pub trait Simulee: Clone + UnwindSafe {
         config: &Config<Self::Config>,
         wall_time: u64,
         delivery: &mut Option<Delivery<Self::Message>>,
-    ) -> (Self::HistoricalEvent, Vec<(NodeIndex, Self::Message)>);
+    ) -> Option<(Self::HistoricalEvent, Vec<(NodeIndex, Self::Message)>)>;
 }
