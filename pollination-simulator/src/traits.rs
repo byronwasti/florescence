@@ -11,6 +11,7 @@ pub trait Simulee: Clone + UnwindSafe {
 
     fn new<R: Rng + ?Sized>(rng: &mut R, config: &Config<Self::Config>, addr: NodeIndex) -> Self;
 
+    #[allow(clippy::type_complexity)]
     fn step<R: Rng + ?Sized>(
         &mut self,
         rng: &mut R,

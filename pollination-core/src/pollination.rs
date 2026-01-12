@@ -164,11 +164,11 @@ where
         let mut self_removed = false;
         for (removed_id, info) in removals.drain(..) {
             self.reality_token.push(info.uuid);
-            if let Some(own_id) = self.id() {
-                if *own_id == removed_id {
-                    debug!("Applied patch removes own ID");
-                    self_removed = true;
-                }
+            if let Some(own_id) = self.id()
+                && *own_id == removed_id
+            {
+                debug!("Applied patch removes own ID");
+                self_removed = true;
             }
         }
 

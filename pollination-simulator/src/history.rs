@@ -60,7 +60,7 @@ pub struct HistoricalRecord<S: Simulee> {
     pub msgs_out: Vec<(NodeIndex, S::Message)>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct HistoricalIndex {
     inner: HashMap<NodeIndex, Vec<u64>>,
 }
@@ -71,14 +71,6 @@ impl HistoricalIndex {
             v.push(event_time);
         } else {
             self.inner.insert(node_index, vec![event_time]);
-        }
-    }
-}
-
-impl Default for HistoricalIndex {
-    fn default() -> Self {
-        Self {
-            inner: HashMap::new(),
         }
     }
 }

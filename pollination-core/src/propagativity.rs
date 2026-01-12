@@ -1,8 +1,9 @@
 use std::fmt;
 use treeclocks::IdTree;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) enum Propagativity {
+    #[default]
     Unknown,
     Propagating(IdTree),
     Resting(IdTree),
@@ -48,12 +49,6 @@ impl Propagativity {
             }
             Unknown => None,
         }
-    }
-}
-
-impl Default for Propagativity {
-    fn default() -> Self {
-        Self::Unknown
     }
 }
 

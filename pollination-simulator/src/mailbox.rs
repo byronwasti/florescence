@@ -73,9 +73,10 @@ impl<M> PartialEq for Mail<M> {
 
 impl<M> Eq for Mail<M> {}
 
+#[allow(clippy::non_canonical_partial_ord_impl)]
 impl<M> PartialOrd for Mail<M> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.sort.partial_cmp(&other.sort)
+        Some(self.sort.cmp(&other.sort))
     }
 }
 

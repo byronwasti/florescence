@@ -43,7 +43,7 @@ impl<S: Simulee> Sim<S> {
         let nodes = self.random_ordering();
         for node in nodes {
             let node = self.nodes.node_weight_mut(node).expect("Node to exist");
-            match node.step(&mut self.rng, self.history.wall_time(), &config) {
+            match node.step(&mut self.rng, self.history.wall_time(), config) {
                 Ok(record) => {
                     return Ok(Some(record));
                 }
@@ -60,9 +60,7 @@ impl<S: Simulee> Sim<S> {
     }
 
     fn random_ordering(&mut self) -> Vec<NodeIndex> {
-        let mut node_ids: Vec<_> = (0..self.nodes.node_count())
-            .map(|id| NodeIndex::new(id))
-            .collect();
+        let mut node_ids: Vec<_> = (0..self.nodes.node_count()).map(NodeIndex::new).collect();
         node_ids.shuffle(&mut self.rng);
         node_ids
     }
