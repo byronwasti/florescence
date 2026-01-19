@@ -18,6 +18,10 @@ impl Propagativity {
         }
     }
 
+    pub(crate) fn propagating(&self) -> bool {
+        matches!(self, Propagativity::Propagating(_))
+    }
+
     pub(crate) fn set_propagating(&mut self) -> bool {
         use Propagativity::*;
         let s = std::mem::replace(self, Self::Unknown);

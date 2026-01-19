@@ -385,6 +385,12 @@ dependencies = [
 [[package]]
 name = "pollination-simulation"
 version = "0.1.0"
+dependencies = [
+ "pollination",
+ "pollination-simulator",
+ "rand",
+ "uuid",
+]
 
 [[package]]
 name = "pollination-simulator"

@@ -40,7 +40,7 @@ impl<Message: Clone> Delivery<Message> {
         self.mail.clone()
     }
 
-    pub fn take_final(self) -> Mail<Message> {
+    pub(crate) fn take_final(self) -> Mail<Message> {
         self.mail
     }
 

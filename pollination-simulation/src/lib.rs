@@ -1,3 +1,156 @@
+use pollination::{
+    PollinationError, PollinationMessage, PollinationNode, PollinationResponse, Topic,
+};
+use pollination_simulator::{Config, Delivery, NodeIndex, Simulee};
+use rand::{
+    distr::{Distribution, weighted::WeightedIndex},
+    prelude::*,
+};
+use uuid::Uuid;
+
+#[derive(Debug, Clone)]
+pub struct SimulatedPollinationNode {
+    inner: PollinationNode<NodeIndex>,
+    last_reap: u64,
+    last_heartbeat: u64,
+    last_propagation: u64,
+}
+
+impl Simulee for SimulatedPollinationNode {
+    type Config = PollinationConfig;
+    type Message = PollinationMessage;
+    type HistoricalEvent = PollinationEvent<NodeIndex>;
+
+    fn new<R: Rng + ?Sized>(rng: &mut R, _config: &Config<Self::Config>, id: NodeIndex) -> Self {
+        // TODO: The basic network should be figured out here. Somehow...
+
+        let inner = PollinationNode::new(Uuid::from_u128(rng.random()), Topic::new("None"), id);
+        Self {
+            inner,
+            last_reap: 0,
+            last_heartbeat: 0,
+            last_propagation: 0,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn step<R: Rng + ?Sized>(
+        &mut self,
+        rng: &mut R,
+        config: &Config<Self::Config>,
+        wall_time: u64,
+        delivery: &mut Option<Delivery<Self::Message>>,
+    ) -> Option<(Self::HistoricalEvent, Vec<(NodeIndex, Self::Message)>)> {
+        let mut events = vec![];
+        let mut weights = vec![];
+
+        if !self.inner.propagating()
+            && config.custom.timeout_propagativity > (wall_time - self.last_propagation)
+        {
+            events.push(StepOptions::ResetPropagativity);
+            weights.push(10);
+        }
+
+        if config.custom.timeout_reap > (wall_time - self.last_reap) {
+            events.push(StepOptions::ReapSouls);
+            weights.push(5);
+        }
+
+        if config.custom.timeout_heartbeat > (wall_time - self.last_heartbeat) {
+            events.push(StepOptions::Heartbeat);
+            weights.push(5);
+        }
+
+        if delivery.is_some() {
+            events.push(StepOptions::HandleMessage);
+            weights.push(2);
+        }
+
+        events.push(StepOptions::Skip);
+        weights.push(1);
+
+        let dist = WeightedIndex::new(&weights).expect("Invalid random weights");
+        let event = events[dist.sample(rng)];
+
+        match event {
+            StepOptions::ReapSouls => {
+                let reaped = self.inner.reap_souls();
+                Some((PollinationEvent::GrimReaper(reaped), vec![]))
+            }
+            StepOptions::Heartbeat => {
+                let msg = self.inner.msg_heartbeat();
+
+                if let Some(msg) = msg {
+                    let msgs = self
+                        .inner
+                        .peers_alive()
+                        .choose_multiple(rng, config.custom.rand_robin_count)
+                        .into_iter()
+                        .map(|(_, info)| {
+                            (info.addr.expect("Expected addr to be present"), msg.clone())
+                        })
+                        .collect();
+                    Some((PollinationEvent::Heartbeat, msgs))
+                } else {
+                    Some((PollinationEvent::FailedHeartbeat, vec![]))
+                }
+            }
+            StepOptions::ResetPropagativity => {
+                self.inner.set_propagating();
+                Some((PollinationEvent::SetPropagating, vec![]))
+            }
+            StepOptions::HandleMessage => {
+                let mail = delivery
+                    .as_mut()
+                    .expect("Delivery expected to be Some")
+                    .take();
+                let from = mail.from;
+                let msg = mail.msg;
+
+                let res = self.inner.handle_message(msg);
+                match res {
+                    Ok(PollinationResponse { response, old_core }) => {
+                        let msgs = response.map(|msg| (from, msg)).into_iter().collect();
+
+                        Some((PollinationEvent::HandleMessage(old_core), msgs))
+                    }
+                    Err(err) => Some((PollinationEvent::FailedMessage(err), vec![])),
+                }
+            }
+            StepOptions::Skip => None,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+enum StepOptions {
+    ReapSouls,
+    Heartbeat,
+    ResetPropagativity,
+    HandleMessage,
+    Skip,
+}
+
+#[derive(Debug)]
+pub enum PollinationEvent<A> {
+    GrimReaper(bool),
+    Heartbeat,
+    FailedHeartbeat,
+    SetPropagating,
+    HandleMessage(Option<PollinationNode<A>>),
+    FailedMessage(PollinationError),
+    Update,
+    None,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PollinationConfig {
+    timeout_reap: u64,
+    timeout_heartbeat: u64,
+    timeout_propagativity: u64,
+    rand_robin_count: usize,
+}
+
 // From sim
 /*
 nodes.add_node(SimNode {

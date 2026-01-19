@@ -59,6 +59,12 @@ where
         self.set_raw(self.own_info.clone());
     }
 
+    pub fn peers_alive(&self) -> impl Iterator<Item = (&IdTree, &PeerInfo<A>)> {
+        self.core_map
+            .iter()
+            .filter(|(_, info)| matches!(info.status, PeerStatus::Healthy))
+    }
+
     pub fn peers(&self) -> impl Iterator<Item = (&IdTree, &PeerInfo<A>)> {
         self.core_map.iter()
     }
@@ -73,6 +79,10 @@ where
 
     pub fn set_propagating(&mut self) -> bool {
         self.propagativity.set_propagating()
+    }
+
+    pub fn propagating(&self) -> bool {
+        self.propagativity.propagating()
     }
 
     fn set_raw(&mut self, own_info: PeerInfo<A>) -> Option<()> {

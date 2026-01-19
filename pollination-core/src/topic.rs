@@ -6,8 +6,8 @@ use std::hash::Hash;
 pub struct Topic(String);
 
 impl Topic {
-    pub fn new(inner: String) -> Topic {
-        Self(inner)
+    pub fn new<S: Into<String>>(inner: S) -> Topic {
+        Self(inner.into())
     }
 }
 
