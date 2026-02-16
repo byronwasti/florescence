@@ -1,7 +1,4 @@
-use egui::{
-    Color32, Frame, Painter, Pos2, Rect, Response, Scene, Sense, Shape, Stroke, Ui, Vec2, Widget,
-    emath, pos2, vec2,
-};
+use egui::Color32;
 
 use serde::{Deserialize, Serialize};
 

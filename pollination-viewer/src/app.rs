@@ -1,16 +1,11 @@
 #![allow(unused)]
-use crate::{
-    widgets::{ForceGraph, ForceGraphConfig, ForceGraphSettingsWidget, ForceGraphWidget},
-};
+use crate::widgets::{ForceGraph, ForceGraphConfig, ForceGraphSettingsWidget, ForceGraphWidget};
 use egui::{
     Color32, Frame, Painter, Pos2, Rect, Scene, ScrollArea, Sense, Shape, Stroke, Ui, Vec2, emath,
     pos2, vec2,
 };
 use pollination_simulation::SimulatedPollinationNode;
-use pollination_simulator::{
-    Sim,
-    Config,
-};
+use pollination_simulator::{Config, Sim};
 
 #[derive(Default)]
 pub struct PollinationViewer {
@@ -20,8 +15,7 @@ pub struct PollinationViewer {
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
-struct DurableState {
-}
+struct DurableState {}
 
 #[derive(Default)]
 struct EphemeralState {

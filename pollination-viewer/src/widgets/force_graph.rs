@@ -1,6 +1,5 @@
 use egui::{
-    Color32, Painter, Pos2, Rect, Response, Scene, Sense, Shape, Stroke, Ui, Vec2, Widget,
-    emath, pos2, vec2, FontId, Align2
+    Align2, Color32, FontId, Painter, Pos2, Rect, Response, Sense, Shape, Ui, Widget, vec2,
 };
 
 mod config;
@@ -116,7 +115,14 @@ impl<'a> ForceGraphWidget<'a> {
             painter.add(Shape::circle_filled(pos_map[idx], 15., ring_color));
             painter.add(Shape::circle_filled(pos_map[idx], 10., node_color));
             ui.ctx().fonts(|fontView| {
-                painter.add(Shape::text(fontView, pos_map[idx], Align2::LEFT_TOP, format!("{idx}"), FontId::proportional(1.0), self.config.node_color));
+                painter.add(Shape::text(
+                    fontView,
+                    pos_map[idx],
+                    Align2::LEFT_TOP,
+                    format!("{idx}"),
+                    FontId::proportional(1.0),
+                    self.config.node_color,
+                ));
             })
         }
     }

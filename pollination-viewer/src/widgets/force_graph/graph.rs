@@ -1,13 +1,7 @@
-use egui::{Pos2, Vec2, pos2, vec2};
-use fjadra::{Center, Link, ManyBody, Node as FNode, PositionX, PositionY, SimulationBuilder};
-use petgraph::{
-    dot::{Config, Dot},
-    graph::{Graph, UnGraph},
-    visit::EdgeRef,
-};
+use egui::{Pos2, pos2};
+use fjadra::{Center, Link, ManyBody, Node as FNode, SimulationBuilder};
+use petgraph::{dot::Dot, graph::Graph, visit::EdgeRef};
 use rand::Rng;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Debug, Default)]
 pub struct Node {
