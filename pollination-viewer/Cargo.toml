@@ -29,7 +29,8 @@ petgraph = { version = "0.8.2", features = ["serde-1"] }
 rand = "0.9.2"
 fjadra = "0.2.1"
 pollination = { path = "../pollination-core" }
-pollination-simulation = { path = "../simulation" }
+pollination-simulation = { path = "../pollination-simulation" }
+pollination-simulator = { path = "../pollination-simulator" }
 uuid = "1.18.1"
 anyhow = "1.0.100"
 

@@ -1,8 +1,6 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
-mod app;
-mod simulation;
-mod widgets;
-mod sim_runner;
+pub mod app;
+pub mod widgets;
 
 pub use app::PollinationViewer;

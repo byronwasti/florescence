@@ -1,5 +1,5 @@
 use egui::{
-    Color32, Frame, Painter, Pos2, Rect, Response, Scene, Sense, Shape, Stroke, Ui, Vec2, Widget,
+    Color32, Painter, Pos2, Rect, Response, Scene, Sense, Shape, Stroke, Ui, Vec2, Widget,
     emath, pos2, vec2, FontId, Align2
 };
 
@@ -23,7 +23,6 @@ impl Widget for ForceGraphWidget<'_> {
 
         let (pos_map, fixed) = self.position_map(ui, &response);
         self.graph.run_force_simulation(self.config, &fixed);
-        //self.ui.ctx().request_repaint();
 
         self.draw_graph(ui, &painter, &response, &pos_map);
         response
