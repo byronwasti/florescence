@@ -67,7 +67,7 @@ impl ForceGraph {
             });
         }
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let conns = 2;
         for i in 0..count {
@@ -88,7 +88,7 @@ impl ForceGraph {
     pub fn k_graph(k: usize) -> ForceGraph {
         let mut g = Graph::<Node, ()>::new();
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         for i in 0..k {
             g.add_node(Node {
                 id: i,

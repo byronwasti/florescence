@@ -34,11 +34,11 @@ impl<S: Simulee> SimNode<S> {
         let snapshot = self
             .simulee
             .as_ref()
-            .expect("No simulee available.")
+            .ok_or(SimNodeError::Panic("No simulee available.".to_string()))?
             .clone();
 
         let mut delivery = self.mailbox.get_delivery();
-        let mut simulee = self.simulee.take().expect("No simulee available.");
+        let mut simulee = self.simulee.take().ok_or(SimNodeError::Panic("No simulee available.".to_string()))?;
         let config = config.clone();
         let seed = rng.random();
         let res = panic::catch_unwind(move || {

@@ -1,5 +1,6 @@
-#[non_exhaustive]
-#[derive(Debug, Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config<C> {
     pub node_count: usize,
     pub seed: u64,

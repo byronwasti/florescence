@@ -4,22 +4,49 @@ use egui::{
     Color32, Frame, Painter, Pos2, Rect, Scene, ScrollArea, Sense, Shape, Stroke, Ui, Vec2, emath,
     pos2, vec2,
 };
-use pollination_simulation::SimulatedPollinationNode;
+use pollination_simulation::{PollinationConfig, SimulatedPollinationNode};
 use pollination_simulator::{Config, Sim};
 
-#[derive(Default)]
 pub struct PollinationViewer {
     durable: DurableState,
     ephemeral: EphemeralState,
 }
 
-#[derive(Default, serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
-struct DurableState {}
+struct DurableState {
+    sim_config: Config<PollinationConfig>,
+}
 
-#[derive(Default)]
+impl Default for DurableState {
+    fn default() -> DurableState {
+        Self {
+            sim_config: Config {
+                node_count: 5,
+                seed: 1234,
+                custom: PollinationConfig {
+                    timeout_reap: 5,
+                    timeout_heartbeat: 5,
+                    timeout_propagativity: 5,
+                    rand_robin_count: 2,
+                },
+            },
+        }
+    }
+}
+
 struct EphemeralState {
-    sim: Option<Sim<SimulatedPollinationNode>>,
+    sim: Sim<SimulatedPollinationNode>,
+    step: bool,
+}
+
+impl EphemeralState {
+    fn new(saved: &DurableState) -> Self {
+        Self {
+            sim: Sim::new(saved.sim_config.clone()),
+            step: false,
+        }
+    }
 }
 
 impl eframe::App for PollinationViewer {
@@ -28,8 +55,13 @@ impl eframe::App for PollinationViewer {
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if self.ephemeral.step {
+            println!("Simulation Step");
+            self.ephemeral.sim.step();
+        }
         self.draw_header(ctx, frame);
-        self.draw_overview(ctx, frame);
+        self.draw_history(ctx, frame);
+        self.draw_controls(ctx, frame);
     }
 }
 
@@ -42,8 +74,8 @@ impl PollinationViewer {
         };
 
         PollinationViewer {
+            ephemeral: EphemeralState::new(&saved),
             durable: saved,
-            ..Default::default()
         }
     }
 
@@ -66,10 +98,40 @@ impl PollinationViewer {
         });
     }
 
-    fn draw_overview(&self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::Window::new("Overview").show(ctx, |ui| {
+    fn draw_history(&self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::Window::new("History").show(ctx, |ui| {
             ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
-                ui.label("Node Overview");
+                let history = self.ephemeral.sim.history();
+                ui.label(format!("Event time {}", history.time()));
+                ui.label(format!("Wall time {}", history.wall_time()));
+                for (time, record) in history.records().enumerate() {
+                    if let Some(record) = record {
+                        ui.collapsing(
+                            format!(
+                                "{time} NodeId={} event={:?}",
+                                record.id.index(),
+                                record.event
+                            ),
+                            |ui| {
+                                ui.label(format!("msg_in={:?}", record.msg_in));
+                                ui.label(format!("msgs_out={:?}", record.msgs_out));
+                            },
+                        );
+                    } else {
+                        ui.label("No event took place.");
+                    }
+                }
+            })
+        });
+    }
+
+    fn draw_controls(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::Window::new("Sim Controls").show(ctx, |ui| {
+            ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
+                self.ephemeral.step = ui.button("Step").clicked();
+                if let Some(panic) = self.ephemeral.sim.panic_msg() {
+                    ui.label(format!("PANIC {panic}"));
+                }
             })
         });
     }

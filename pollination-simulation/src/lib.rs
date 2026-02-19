@@ -6,6 +6,7 @@ use rand::{
     distr::{Distribution, weighted::WeightedIndex},
     prelude::*,
 };
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -143,12 +144,12 @@ pub enum PollinationEvent<A> {
     None,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct PollinationConfig {
-    timeout_reap: u64,
-    timeout_heartbeat: u64,
-    timeout_propagativity: u64,
-    rand_robin_count: usize,
+    pub timeout_reap: u64,
+    pub timeout_heartbeat: u64,
+    pub timeout_propagativity: u64,
+    pub rand_robin_count: usize,
 }
 
 // From sim

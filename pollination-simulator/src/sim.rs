@@ -74,6 +74,10 @@ impl<S: Simulee> Sim<S> {
         &self.history
     }
 
+    pub fn panic_msg(&self) -> Option<&str> {
+        self.panic_msg.as_deref()
+    }
+
     pub fn nodes(&self) -> impl Iterator<Item = &SimNode<S>> {
         self.nodes.node_weights()
     }

@@ -88,7 +88,7 @@ impl<'a> ForceGraphWidget<'a> {
         (out, fixed)
     }
 
-    fn draw_graph(&self, ui: &mut Ui, painter: &Painter, response: &Response, pos_map: &[Pos2]) {
+    fn draw_graph(&self, ui: &mut Ui, painter: &Painter, _response: &Response, pos_map: &[Pos2]) {
         for node in self.graph.inner().node_weights() {
             for neighbor in self.graph.inner().neighbors((node.id as u32).into()) {
                 let neighbor = self.graph.inner().node_weight(neighbor).unwrap();
@@ -105,7 +105,7 @@ impl<'a> ForceGraphWidget<'a> {
             }
         }
 
-        for (idx, node) in self.graph.inner().node_weights().enumerate() {
+        for (idx, _node) in self.graph.inner().node_weights().enumerate() {
             let (ring_color, node_color) = if let Some(color_fn) = &self.node_color_provider {
                 color_fn(idx as u32)
             } else {
@@ -114,9 +114,9 @@ impl<'a> ForceGraphWidget<'a> {
 
             painter.add(Shape::circle_filled(pos_map[idx], 15., ring_color));
             painter.add(Shape::circle_filled(pos_map[idx], 10., node_color));
-            ui.ctx().fonts(|fontView| {
+            ui.ctx().fonts(|font_view| {
                 painter.add(Shape::text(
-                    fontView,
+                    font_view,
                     pos_map[idx],
                     Align2::LEFT_TOP,
                     format!("{idx}"),
@@ -129,27 +129,17 @@ impl<'a> ForceGraphWidget<'a> {
 }
 
 pub struct ForceGraphSettingsWidget<'a> {
-    graph: &'a mut ForceGraph,
     config: &'a mut ForceGraphConfig,
 }
 
 impl<'a> ForceGraphSettingsWidget<'a> {
-    pub fn new(
-        graph: &'a mut ForceGraph,
-        config: &'a mut ForceGraphConfig,
-    ) -> ForceGraphSettingsWidget<'a> {
-        Self { graph, config }
+    pub fn new(config: &'a mut ForceGraphConfig) -> ForceGraphSettingsWidget<'a> {
+        Self { config }
     }
 }
 
 impl Widget for ForceGraphSettingsWidget<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
-        /*
-        if ui.button("Reset").clicked() {
-            *self.graph = ForceGraph::random();
-        }
-        */
-
         ui.checkbox(&mut self.config.velocity_decay_enabled, "velocity_decay");
         if self.config.velocity_decay_enabled {
             ui.add(egui::Slider::new(

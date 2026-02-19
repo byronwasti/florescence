@@ -27,8 +27,8 @@ impl<S: Simulee> History<S> {
         self.wall_time
     }
 
-    pub fn records(&self) -> &Vec<Option<HistoricalRecord<S>>> {
-        &self.records
+    pub fn records(&self) -> impl Iterator<Item=&Option<HistoricalRecord<S>>> {
+        self.records.iter()
     }
 
     /// Record a record. English is fun.
