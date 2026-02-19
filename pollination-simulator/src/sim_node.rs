@@ -29,7 +29,7 @@ impl<S: Simulee> SimNode<S> {
         rng: &mut R,
         wall_time: u64,
         config: &Config<S::Config>,
-    ) -> Result<HistoricalRecord<S>, SimNodeError> {
+    ) -> Result<NodeRecord<S>, SimNodeError> {
         // Before doing anything, we want to snapshot the node as-is.
         let snapshot = self
             .simulee
@@ -38,14 +38,17 @@ impl<S: Simulee> SimNode<S> {
             .clone();
 
         let mut delivery = self.mailbox.get_delivery();
-        let mut simulee = self.simulee.take().ok_or(SimNodeError::Panic("No simulee available.".to_string()))?;
+        let mut simulee = self
+            .simulee
+            .take()
+            .ok_or(SimNodeError::Panic("No simulee available.".to_string()))?;
         let config = config.clone();
         let seed = rng.random();
         let res = panic::catch_unwind(move || {
             // Can't pass an Rng across the unwind boundary, so just reseed a new one.
             let mut rng = StdRng::seed_from_u64(seed);
-            let (event, msgs_out) = simulee.step(&mut rng, &config, wall_time, &mut delivery)?;
-            Some((event, msgs_out, simulee, delivery))
+            let res = simulee.step(&mut rng, &config, wall_time, &mut delivery);
+            (simulee, delivery, res)
         })
         .map_err(|err| {
             if let Some(err) = err.downcast_ref::<&str>() {
@@ -57,8 +60,7 @@ impl<S: Simulee> SimNode<S> {
             }
         })?;
 
-        let (event, msgs_out, simulee, delivery) = res.ok_or(SimNodeError::NoAction)?;
-
+        let (simulee, delivery, res) = res;
         self.simulee = Some(simulee);
 
         let msg_in = if let Some(delivery) = delivery {
@@ -74,13 +76,20 @@ impl<S: Simulee> SimNode<S> {
             None
         };
 
-        Ok(HistoricalRecord {
-            id: self.id,
-            snapshot,
-            event,
-            msg_in,
-            msgs_out,
-        })
+        match (msg_in, res) {
+            (msg_in, Some((event, msgs_out))) => Ok(NodeRecord {
+                id: self.id,
+                snapshot,
+                event,
+                msg_in,
+                msgs_out,
+            }),
+            (Some(_), None) => {
+                // Node took a message but didn't record any event. This is an error
+                Err(SimNodeError::Panic("Stolen message".to_string()))
+            }
+            (None, None) => Err(SimNodeError::NoAction),
+        }
     }
 }
 

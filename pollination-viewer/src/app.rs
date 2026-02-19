@@ -5,7 +5,7 @@ use egui::{
     pos2, vec2,
 };
 use pollination_simulation::{PollinationConfig, SimulatedPollinationNode};
-use pollination_simulator::{Config, Sim};
+use pollination_simulator::{Config, Sim, history::HistoricalRecord};
 
 pub struct PollinationViewer {
     durable: DurableState,
@@ -105,20 +105,26 @@ impl PollinationViewer {
                 ui.label(format!("Event time {}", history.time()));
                 ui.label(format!("Wall time {}", history.wall_time()));
                 for (time, record) in history.records().enumerate() {
-                    if let Some(record) = record {
-                        ui.collapsing(
-                            format!(
-                                "{time} NodeId={} event={:?}",
-                                record.id.index(),
-                                record.event
-                            ),
-                            |ui| {
-                                ui.label(format!("msg_in={:?}", record.msg_in));
-                                ui.label(format!("msgs_out={:?}", record.msgs_out));
-                            },
-                        );
-                    } else {
-                        ui.label("No event took place.");
+                    match record {
+                        HistoricalRecord::NodeEvent(record) => {
+                            ui.collapsing(
+                                format!(
+                                    "{time} NodeId={:?} event={:?}",
+                                    record.id,
+                                    record.event
+                                ),
+                                |ui| {
+                                    ui.label(format!("msg_in={:?}", record.msg_in));
+                                    ui.label(format!("msgs_out={:?}", record.msgs_out));
+                                },
+                            );
+                        }
+                        HistoricalRecord::NoEvent => {
+                            ui.label("No event took place.");
+                        }
+                        HistoricalRecord::Error(node_id, error) => {
+                            ui.label(format!("{node_id:?} had an error {error}"));
+                        }
                     }
                 }
             })

@@ -38,30 +38,30 @@ impl<S: Simulee> Sim<S> {
         if let Some(panic_msg) = &self.panic_msg {
             return Err(SimError::Panic(panic_msg.clone()));
         }
-        let record = self.step_inner()?;
+        let record = self.step_inner();
         self.history.record(record);
 
         Ok(())
     }
 
-    fn step_inner(&mut self) -> Result<Option<HistoricalRecord<S>>, SimError> {
+    fn step_inner(&mut self) -> HistoricalRecord<S> {
         let nodes = self.random_ordering();
         for node in nodes {
             let node = self.nodes.node_weight_mut(node).expect("Node to exist");
             match node.step(&mut self.rng, self.history.wall_time(), &self.config) {
                 Ok(record) => {
-                    return Ok(Some(record));
+                    return HistoricalRecord::NodeEvent(record);
                 }
                 Err(SimNodeError::NoAction) => continue,
                 Err(err) => {
                     let err_msg = err.to_string();
                     self.panic_msg = Some(err_msg.clone());
-                    return Err(SimError::Panic(err_msg));
+                    return HistoricalRecord::Error(node.id, err_msg);
                 }
             }
         }
 
-        Ok(None)
+        HistoricalRecord::NoEvent
     }
 
     fn random_ordering(&mut self) -> Vec<NodeIndex> {

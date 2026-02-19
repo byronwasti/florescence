@@ -60,9 +60,9 @@ where
     }
 
     pub fn peers_alive(&self) -> impl Iterator<Item = (&IdTree, &PeerInfo<A>)> {
-        self.core_map
-            .iter()
-            .filter(|(_, info)| matches!(info.status, PeerStatus::Healthy))
+        self.core_map.iter().filter(|(_, info)| {
+            matches!(info.status, PeerStatus::Healthy) && info.uuid != self.uuid
+        })
     }
 
     pub fn peers(&self) -> impl Iterator<Item = (&IdTree, &PeerInfo<A>)> {

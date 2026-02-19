@@ -9,7 +9,7 @@ use std::collections::HashMap;
 /// parallel execution and timeouts work nicely together.
 #[derive(Debug)]
 pub struct History<S: Simulee> {
-    records: Vec<Option<HistoricalRecord<S>>>,
+    records: Vec<HistoricalRecord<S>>,
     wall_time: u64,
     index: HistoricalIndex,
 }
@@ -27,20 +27,24 @@ impl<S: Simulee> History<S> {
         self.wall_time
     }
 
-    pub fn records(&self) -> impl Iterator<Item=&Option<HistoricalRecord<S>>> {
+    pub fn records(&self) -> impl Iterator<Item = &HistoricalRecord<S>> {
         self.records.iter()
     }
 
     /// Record a record. English is fun.
     /// Increments the `event_time` always.
     /// Increments the `wall_time` when given `None`.
-    pub(crate) fn record(&mut self, record: Option<HistoricalRecord<S>>) {
-        if let Some(record) = record.as_ref() {
-            self.index.insert(record.id, self.records.len() as u64)
-        } else {
-            // No event in all of the nodes, increment the wall time.
-            self.wall_time += 1;
+    pub(crate) fn record(&mut self, record: HistoricalRecord<S>) {
+        match &record {
+            HistoricalRecord::NodeEvent(node_record) => {
+                self.index.insert(node_record.id, self.records.len() as u64)
+            }
+            HistoricalRecord::NoEvent => {
+                self.wall_time += 1;
+            }
+            _ => {}
         }
+
         self.records.push(record);
     }
 }
@@ -56,7 +60,14 @@ impl<S: Simulee> Default for History<S> {
 }
 
 #[derive(Debug)]
-pub struct HistoricalRecord<S: Simulee> {
+pub enum HistoricalRecord<S: Simulee> {
+    NodeEvent(NodeRecord<S>),
+    Error(NodeIndex, String),
+    NoEvent,
+}
+
+#[derive(Debug)]
+pub struct NodeRecord<S: Simulee> {
     pub id: NodeIndex,
     pub snapshot: S,
     pub event: S::HistoricalEvent,

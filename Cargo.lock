@@ -389,6 +389,7 @@ dependencies = [
  "pollination",
  "pollination-simulator",
  "rand",
+ "serde",
  "uuid",
 ]
 
