@@ -1,6 +1,4 @@
-use pollination::{
-    PollinationError, PollinationMessage, PollinationNode, PollinationResponse, Topic,
-};
+use pollination::{PollinationError, PollinationMessage, PollinationNode, PollinationResponse};
 use pollination_simulator::{Config, Delivery, NodeIndex, Simulee};
 use rand::{
     distr::{Distribution, weighted::WeightedIndex},
@@ -25,7 +23,7 @@ impl Simulee for SimulatedPollinationNode {
     fn new<R: Rng + ?Sized>(rng: &mut R, _config: &Config<Self::Config>, id: NodeIndex) -> Self {
         // TODO: The basic network should be figured out here. Somehow...
 
-        let inner = PollinationNode::new(Uuid::from_u128(rng.random()), Topic::new("None"), id);
+        let inner = PollinationNode::new(Uuid::from_u128(rng.random()), id);
         Self {
             inner,
             last_reap: 0,
@@ -87,9 +85,7 @@ impl Simulee for SimulatedPollinationNode {
                         .peers_alive()
                         .choose_multiple(rng, config.custom.rand_robin_count)
                         .into_iter()
-                        .map(|(_, info)| {
-                            (info.addr.expect("Expected addr to be present"), msg.clone())
-                        })
+                        .map(|(_, info)| (info.addr, msg.clone()))
                         .collect();
                     Some((PollinationEvent::Heartbeat, msgs))
                 } else {

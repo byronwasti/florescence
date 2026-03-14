@@ -5,25 +5,16 @@ use uuid::Uuid;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PeerInfo<A> {
     pub uuid: Uuid,
-    pub addr: Option<A>,
     pub status: PeerStatus,
-    // topics: Vec<Topic>,
+    pub addr: A,
 }
 
 impl<A> PeerInfo<A> {
     pub(crate) fn new(uuid: Uuid, addr: A) -> Self {
         Self {
-            addr: Some(addr),
+            addr,
             status: PeerStatus::Healthy,
             uuid,
-        }
-    }
-
-    pub(crate) fn dead() -> Self {
-        Self {
-            addr: None,
-            status: PeerStatus::Dead,
-            uuid: Uuid::from_u128(0),
         }
     }
 }
@@ -33,13 +24,7 @@ impl<A: fmt::Display> fmt::Display for PeerInfo<A> {
         write!(
             f,
             "UUID:{}, STATUS:{}, ADDR:{}",
-            self.uuid,
-            self.status,
-            if let Some(addr) = &self.addr {
-                format!("{addr}")
-            } else {
-                "?".to_string()
-            }
+            self.uuid, self.status, self.addr,
         )
     }
 }

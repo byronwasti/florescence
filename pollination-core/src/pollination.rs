@@ -1,5 +1,5 @@
 use crate::{
-    message::{BinaryPatch, PollinationMessage, Topic},
+    message::{BinaryPatch, PollinationMessage},
     peer_info::{PeerInfo, PeerStatus},
     propagativity::Propagativity,
     reality_token::RealityToken,
@@ -15,7 +15,6 @@ mod recycling;
 #[derive(Clone, Debug)]
 pub struct PollinationNode<A> {
     uuid: Uuid,
-    topic: Topic,
     propagativity: Propagativity,
     reality_token: RealityToken,
     core_map: ItcMap<PeerInfo<A>>,
@@ -27,14 +26,13 @@ where
     A: Clone + for<'a> Deserialize<'a> + Serialize,
 {
     #[allow(unused)]
-    pub fn new(uuid: Uuid, topic: Topic, own_data: A) -> Self {
-        let own_info = PeerInfo::new(uuid, own_data);
+    pub fn new(uuid: Uuid, addr: A) -> Self {
+        let own_info = PeerInfo::new(uuid, addr);
         let reality_token = RealityToken::new(uuid);
         let mut core_map = ItcMap::new();
         core_map.insert(IdTree::One, own_info.clone());
         Self {
             propagativity: Propagativity::Propagating(IdTree::One),
-            topic,
             reality_token,
             core_map,
             uuid,
@@ -105,12 +103,15 @@ where
     /// NOTE: Not a clean swap; the new core has most information
     /// wiped. This is a helper function to efficiently reset.
     fn swap_cores(&mut self, mut other: PollinationNode<A>) -> PollinationNode<A> {
+        todo!()
+        /*
         self.set_raw(PeerInfo::dead());
         std::mem::swap(self, &mut other);
         self.propagativity = Propagativity::Unknown;
         self.core_map = ItcMap::new();
         self.reality_token = RealityToken::zero();
         other
+            */
     }
 
     fn propagate(&mut self) -> Option<IdTree> {
@@ -119,52 +120,29 @@ where
         Some(new_id)
     }
 
-    /// NOTE: Doesn't return PatchApplyError::SelfRemoved
     fn apply_patch(
         &mut self,
         peer_rt: RealityToken,
         patch: BinaryPatch,
     ) -> Result<(), PatchApplyError<A>> {
-        if peer_rt != self.reality_token {
-            // Apply patch on a clone to detect RealitySkew
-            let mut self_clone = self.clone();
-            match self_clone.apply_patch_unchecked(patch) {
-                Ok(()) => {
-                    if self_clone.reality_token == peer_rt {
-                        *self = self_clone;
-                        Ok(())
-                    } else {
-                        Err(PatchApplyError::RealitySkew(Box::new(self_clone)))
-                    }
-                }
-                Err(PatchApplyError::SelfRemoved) => {
-                    Err(PatchApplyError::RealitySkew(Box::new(self_clone)))
-                }
-                err => err,
-            }
+        let patch: Patch<PeerInfo<A>> = patch.decode()?;
+        // Apply patch on a clone to detect RealitySkew
+        let mut self_clone = self.clone();
+        if self_clone.apply_patch_unchecked(patch) {
+            // Self was removed; assuming this is a reality skew (could also be a bug)
+            Err(PatchApplyError::RealitySkew(Box::new(self_clone)))
         } else {
-            match self.apply_patch_unchecked(patch) {
-                Ok(()) => {
-                    if self.reality_token != peer_rt {
-                        panic!(
-                            "Reality token mismatch after a clean update. This is a bug. {} != {peer_rt}",
-                            self.reality_token
-                        );
-                    } else {
-                        Ok(())
-                    }
-                }
-                Err(PatchApplyError::SelfRemoved) => {
-                    panic!("Self removal during a peer_rt match update")
-                }
-                Err(PatchApplyError::DeserializationError(err)) => Err(err.into()),
-                _ => unreachable!(),
+            if self_clone.reality_token == peer_rt {
+                *self = self_clone;
+                Ok(())
+            } else {
+                Err(PatchApplyError::RealitySkew(Box::new(self_clone)))
             }
         }
     }
 
-    fn apply_patch_unchecked(&mut self, patch: BinaryPatch) -> Result<(), PatchApplyError<A>> {
-        let patch: Patch<PeerInfo<A>> = patch.decode()?;
+    // Returns a bool of whether self was removed from the core_map
+    fn apply_patch_unchecked(&mut self, patch: Patch<PeerInfo<A>>) -> bool {
         let (mut additions, mut removals) = self.core_map.apply(patch);
 
         for (_, info) in additions.drain(..) {
@@ -182,16 +160,14 @@ where
             }
         }
 
-        if self_removed {
-            Err(PatchApplyError::SelfRemoved)
-        } else {
-            Ok(())
-        }
+        self_removed
     }
 
     fn apply_seed_patch(&mut self, patch: BinaryPatch) -> Result<(), PatchApplyError<A>> {
         let mut new_core = self.clone();
-        new_core.apply_patch_unchecked(patch)?;
+        new_core.core_map = ItcMap::new();
+        let patch: Patch<PeerInfo<A>> = patch.decode()?;
+        new_core.apply_patch_unchecked(patch);
 
         let mut id_to_delete = None;
         for (id, peer_info) in new_core.peers() {
@@ -204,8 +180,11 @@ where
         if let Some(id) = id_to_delete {
             // TODO: Rethink this logic
             warn!("Seed patch for group already a member of; killing old ID");
+            todo!()
+            /*
             new_core.propagativity = Propagativity::Propagating(id.clone());
             new_core.set_raw(PeerInfo::dead());
+                */
         }
 
         *self = new_core;
@@ -271,7 +250,7 @@ where
 
             NewMember { .. } => Ok(self.handle_new_member(message).into()),
 
-            Seed { .. } => Ok(self.handle_seed(message).into()),
+            Seed { .. } => self.handle_seed(message),
         }
     }
 
@@ -363,7 +342,6 @@ where
                     ))
                 }
             }
-            Err(PatchApplyError::SelfRemoved) => unreachable!(),
             Err(PatchApplyError::DeserializationError(err)) => {
                 Err(PollinationError::DeserializationError(err))
             }
@@ -375,10 +353,13 @@ where
         self.msg_seed(new_id)
     }
 
-    fn handle_seed(&mut self, message: PollinationMessage) -> Option<PollinationMessage> {
+    fn handle_seed(
+        &mut self,
+        message: PollinationMessage,
+    ) -> Result<PollinationResponse<A>, PollinationError> {
         let PollinationMessage::Seed {
             timestamp: peer_ts,
-            reality_token: peer_rt,
+            reality_token: _peer_rt,
             patch: peer_patch,
             new_id,
             ..
@@ -389,19 +370,17 @@ where
 
         // Only reset ourselves if we have no ID
         if self.propagativity.id().is_some() {
-            return self.msg_heartbeat();
+            return Ok(PollinationResponse::response(self.msg_heartbeat()));
         }
 
+        self.apply_seed_patch(peer_patch)?;
         if let Some(id) = new_id {
-            let _ = self.apply_seed_patch(peer_patch);
             self.propagativity = Propagativity::resting(id);
             self.set_raw(self.own_info.clone());
             self.check_no_dupes();
-            self.msg_update(&peer_ts)
+            Ok(PollinationResponse::response(self.msg_update(&peer_ts)))
         } else {
-            let _ = self.apply_patch_unchecked(peer_patch);
-            self.reality_token = peer_rt;
-            None
+            Ok(PollinationResponse::response(None))
         }
     }
 
@@ -409,7 +388,6 @@ where
         let id = self.id()?.clone();
         Some(PollinationMessage::Heartbeat {
             uuid: self.uuid,
-            topic: self.topic.clone(),
             id,
             timestamp: self.timestamp().to_owned(),
             reality_token: self.reality_token,
@@ -421,7 +399,6 @@ where
         let patch = self.create_patch(peer_ts);
         Some(PollinationMessage::Update {
             uuid: self.uuid,
-            topic: self.topic.clone(),
             id,
             timestamp: self.timestamp().to_owned(),
             reality_token: self.reality_token,
@@ -434,7 +411,6 @@ where
         let patch = self.create_patch(peer_ts);
         Some(PollinationMessage::RealitySkew {
             uuid: self.uuid,
-            topic: self.topic.clone(),
             id,
             timestamp: self.timestamp().to_owned(),
             reality_token: self.reality_token,
@@ -444,10 +420,7 @@ where
     }
 
     pub fn msg_new_member(&self) -> Option<PollinationMessage> {
-        Some(PollinationMessage::NewMember {
-            uuid: self.uuid,
-            topic: self.topic.clone(),
-        })
+        Some(PollinationMessage::NewMember { uuid: self.uuid })
     }
 
     fn msg_seed(&self, new_id: Option<IdTree>) -> Option<PollinationMessage> {
@@ -455,7 +428,6 @@ where
         let patch = self.create_patch(&EventTree::Leaf(0));
         Some(PollinationMessage::Seed {
             uuid: self.uuid,
-            topic: self.topic.clone(),
             id,
             timestamp: self.timestamp().to_owned(),
             reality_token: self.reality_token,
@@ -473,13 +445,8 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
-            "UUID:{} TOPIC:{} ID:{} RT:{} OWN_INFO:({}) CORE_MAP:({})",
-            self.uuid,
-            self.topic,
-            self.propagativity,
-            self.reality_token,
-            self.own_info,
-            self.core_map
+            "UUID:{} ID:{} RT:{} OWN_INFO:({}) CORE_MAP:({})",
+            self.uuid, self.propagativity, self.reality_token, self.own_info, self.core_map
         )
     }
 }
@@ -527,7 +494,6 @@ impl<A> From<PatchApplyError<A>> for PollinationError {
     fn from(value: PatchApplyError<A>) -> PollinationError {
         match value {
             PatchApplyError::RealitySkew(_) => unreachable!(),
-            PatchApplyError::SelfRemoved => PollinationError::PatchApplyError,
             PatchApplyError::DeserializationError(err) => {
                 PollinationError::DeserializationError(err)
             }
@@ -539,9 +505,6 @@ impl<A> From<PatchApplyError<A>> for PollinationError {
 pub enum PatchApplyError<A> {
     #[error("Reality skew")]
     RealitySkew(Box<PollinationNode<A>>),
-
-    #[error("Update patch removed own ID")]
-    SelfRemoved,
 
     #[error("Deserialization error: {0}")]
     DeserializationError(#[from] crate::serialization::DeserializeError),
@@ -577,13 +540,7 @@ mod tests {
 
         let count = 5;
         let mut nuclei = (0..count)
-            .map(|i| {
-                PollinationNode::new(
-                    Uuid::from_u128(rng.random()),
-                    Topic::new("test".to_string()),
-                    i,
-                )
-            })
+            .map(|i| PollinationNode::new(Uuid::from_u128(rng.random()), i))
             .collect::<Vec<_>>();
 
         for _ in 0..1000 {

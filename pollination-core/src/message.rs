@@ -3,20 +3,16 @@ use serde::{Deserialize, Serialize};
 use treeclocks::{EventTree, IdTree};
 use uuid::Uuid;
 
-pub use crate::topic::Topic;
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum PollinationMessage {
     Heartbeat {
         uuid: Uuid,
-        topic: Topic,
         id: IdTree,
         timestamp: EventTree,
         reality_token: RealityToken,
     },
     Update {
         uuid: Uuid,
-        topic: Topic,
         id: IdTree,
         timestamp: EventTree,
         reality_token: RealityToken,
@@ -24,7 +20,6 @@ pub enum PollinationMessage {
     },
     RealitySkew {
         uuid: Uuid,
-        topic: Topic,
         id: IdTree,
         timestamp: EventTree,
         reality_token: RealityToken,
@@ -33,7 +28,6 @@ pub enum PollinationMessage {
     },
     Seed {
         uuid: Uuid,
-        topic: Topic,
         id: IdTree,
         timestamp: EventTree,
         reality_token: RealityToken,
@@ -42,7 +36,6 @@ pub enum PollinationMessage {
         new_id: Option<IdTree>,
     },
     NewMember {
-        topic: Topic,
         uuid: Uuid,
     },
 }
@@ -56,17 +49,6 @@ impl PollinationMessage {
             | Update { timestamp, .. }
             | RealitySkew { timestamp, .. }
             | Seed { timestamp, .. } => Some(timestamp),
-        }
-    }
-
-    pub fn topic(&self) -> Topic {
-        use PollinationMessage::*;
-        match self {
-            NewMember { topic, .. }
-            | Heartbeat { topic, .. }
-            | Update { topic, .. }
-            | RealitySkew { topic, .. }
-            | Seed { topic, .. } => topic.clone(),
         }
     }
 
@@ -104,19 +86,17 @@ impl std::fmt::Display for PollinationMessage {
         match self {
             Heartbeat {
                 uuid,
-                topic,
                 id,
                 timestamp,
                 reality_token,
             } => {
                 write!(
                     f,
-                    "HEARTBEAT UUID:{uuid} TOPIC:{topic} ID:{id} TS:{timestamp} RT:{reality_token}"
+                    "HEARTBEAT UUID:{uuid} ID:{id} TS:{timestamp} RT:{reality_token}"
                 )
             }
             Update {
                 uuid,
-                topic,
                 id,
                 timestamp,
                 reality_token,
@@ -124,12 +104,11 @@ impl std::fmt::Display for PollinationMessage {
             } => {
                 write!(
                     f,
-                    "UPDATE UUID:{uuid} TOPIC:{topic} ID:{id} TS:{timestamp} RT:{reality_token} PATCH:{patch}"
+                    "UPDATE UUID:{uuid} ID:{id} TS:{timestamp} RT:{reality_token} PATCH:{patch}"
                 )
             }
             RealitySkew {
                 uuid,
-                topic,
                 id,
                 timestamp,
                 reality_token,
@@ -138,12 +117,11 @@ impl std::fmt::Display for PollinationMessage {
             } => {
                 write!(
                     f,
-                    "REALITY_SKEW UUID:{uuid} TOPIC:{topic} ID:{id} TS:{timestamp} RT:{reality_token} PEER_COUNT:{peer_count} PATCH:{patch}"
+                    "REALITY_SKEW UUID:{uuid} ID:{id} TS:{timestamp} RT:{reality_token} PEER_COUNT:{peer_count} PATCH:{patch}"
                 )
             }
             Seed {
                 uuid,
-                topic,
                 id,
                 timestamp,
                 reality_token,
@@ -154,11 +132,11 @@ impl std::fmt::Display for PollinationMessage {
             } => {
                 write!(
                     f,
-                    "SEED UUID:{uuid} TOPIC:{topic} ID:{id} TS:{timestamp} RT:{reality_token} PEER_COUNT:{peer_count} NEW_ID:{new_id:?} PATH:{patch}"
+                    "SEED UUID:{uuid} ID:{id} TS:{timestamp} RT:{reality_token} PEER_COUNT:{peer_count} NEW_ID:{new_id:?} PATH:{patch}"
                 )
             }
-            NewMember { uuid, topic, .. } => {
-                write!(f, "NEW_MEMBER UUID:{uuid} TOPIC:{topic}")
+            NewMember { uuid, .. } => {
+                write!(f, "NEW_MEMBER UUID:{uuid}")
             }
         }
     }
