@@ -1,11 +1,11 @@
 use treeclocks::IdTree;
 
-pub fn claim_ids(own: IdTree, dead_peers: IdTree) -> IdTree {
-    let reclaim_tree = claim_ids_recurse(own, dead_peers);
+pub fn recycle_ids(own: IdTree, dead_peers: IdTree) -> IdTree {
+    let reclaim_tree = recycle_ids_recurse(own, dead_peers);
     convert(reclaim_tree)
 }
 
-fn claim_ids_recurse(own: IdTree, dead_peers: IdTree) -> IdReclaimTree {
+fn recycle_ids_recurse(own: IdTree, dead_peers: IdTree) -> IdReclaimTree {
     use IdTree::*;
     match (own, dead_peers) {
         (Zero, Zero) => IdReclaimTree::Zero,
@@ -16,19 +16,19 @@ fn claim_ids_recurse(own: IdTree, dead_peers: IdTree) -> IdReclaimTree {
         (Zero, SubTree(..)) => IdReclaimTree::Zero,
         (One, SubTree(..)) => {
             // HIT
-            //panic!("Logic bug"),
+            panic!("Logic bug");
             error!("Logic bug");
             IdReclaimTree::One
         }
         (SubTree(..), One) => {
             // HIT
-            //panic!("Logic bug"),
+            panic!("Logic bug");
             error!("Logic bug");
             IdReclaimTree::One
         }
         (SubTree(l, r), Zero) => {
-            let l = claim_ids_recurse(*l, Zero);
-            let r = claim_ids_recurse(*r, Zero);
+            let l = recycle_ids_recurse(*l, Zero);
+            let r = recycle_ids_recurse(*r, Zero);
             match (l, r) {
                 (l @ IdReclaimTree::TrendingLeft(..) | l @ IdReclaimTree::One, r) => {
                     IdReclaimTree::TrendingLeft(Box::new(l), Box::new(r))
@@ -40,8 +40,8 @@ fn claim_ids_recurse(own: IdTree, dead_peers: IdTree) -> IdReclaimTree {
             }
         }
         (SubTree(l0, r0), SubTree(l1, r1)) => {
-            let l = claim_ids_recurse(*l0, *l1);
-            let r = claim_ids_recurse(*r0, *r1);
+            let l = recycle_ids_recurse(*l0, *l1);
+            let r = recycle_ids_recurse(*r0, *r1);
             use IdReclaimTree as Irt;
             match (l, r) {
                 (Irt::Dead, Irt::Dead) => panic!("Logic bug"),
@@ -110,7 +110,7 @@ mod tests {
         let i0 = SubTree(Box::new(One), Box::new(Zero));
         let i1 = SubTree(Box::new(Zero), Box::new(One));
 
-        let new_id = claim_ids(i0, i1);
+        let new_id = recycle_ids(i0, i1);
 
         assert_eq!(new_id.to_string(), "1".to_string());
     }
@@ -125,7 +125,7 @@ mod tests {
         );
         let i1 = SubTree(Box::new(One), Box::new(Zero));
 
-        let new_id = claim_ids(i0, i1);
+        let new_id = recycle_ids(i0, i1);
 
         assert_eq!(new_id.to_string(), "(1, 0)".to_string());
     }
@@ -143,7 +143,7 @@ mod tests {
         );
         let i1 = SubTree(Box::new(One), Box::new(Zero));
 
-        let new_id = claim_ids(i0, i1);
+        let new_id = recycle_ids(i0, i1);
 
         assert_eq!(new_id.to_string(), "(1, 0)".to_string());
     }
@@ -158,7 +158,7 @@ mod tests {
         );
         let i1 = SubTree(Box::new(Zero), Box::new(One));
 
-        let new_id = claim_ids(i0, i1);
+        let new_id = recycle_ids(i0, i1);
 
         assert_eq!(new_id.to_string(), "(0, 1)".to_string());
     }
@@ -176,7 +176,7 @@ mod tests {
         );
         let i1 = SubTree(Box::new(Zero), Box::new(One));
 
-        let new_id = claim_ids(i0, i1);
+        let new_id = recycle_ids(i0, i1);
 
         assert_eq!(new_id.to_string(), "(0, 1)".to_string());
     }
@@ -194,7 +194,7 @@ mod tests {
         );
         let i1 = SubTree(Box::new(Zero), Box::new(One));
 
-        let new_id = claim_ids(i0, i1);
+        let new_id = recycle_ids(i0, i1);
 
         assert_eq!(new_id.to_string(), "((0, (1, 0)), 0)".to_string());
     }
@@ -218,7 +218,7 @@ mod tests {
             Box::new(One),
         );
 
-        let new_id = claim_ids(i0, i1);
+        let new_id = recycle_ids(i0, i1);
 
         assert_eq!(new_id.to_string(), "((0, 1), 0)".to_string());
     }
