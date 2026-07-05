@@ -1,14 +1,10 @@
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashSet,
-    cmp::Ordering,
-};
+use std::{cmp::Ordering, collections::HashSet};
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 use uuid::Uuid;
 
 pub struct PollinationCore<A> {
     id: IdTree,
-    membership_hash: MembershipHash,
     core_map: ItcMap<NodeInfo<A>>,
     own_info: NodeInfo<A>,
 }
@@ -22,12 +18,10 @@ where
         let id = IdTree::One;
         let mut core_map = ItcMap::new();
         core_map.insert(id.clone(), own_info.clone());
-        let membership_hash = MembershipHash::new(&core_map);
 
         Self {
             id,
             core_map,
-            membership_hash,
             own_info,
         }
     }
@@ -64,14 +58,14 @@ where
         }
     }
 
+    // NOTE: Degrades to be heartbeat_message() if the timestamps are equal
     fn update_message(&self, timestamp: &EventTree) -> PollinationMessage<A> {
         let mut msg = self.heartbeat_message();
-        let patch = self.core_map.diff(timestamp);
-        msg.patch = Some(patch);
+        msg.patch = self.core_map.diff(timestamp);
         msg
     }
 
-    fn include_me_message(&self) -> PollinationMessage<A> {
+    fn new_member_message(&self) -> PollinationMessage<A> {
         // Include all of our peers to be included as well
         let mut msg = self.update_message(&EventTree::new());
         msg.request_membership = true;
@@ -108,17 +102,60 @@ where
         &mut self,
         message: PollinationMessage<A>,
     ) -> Option<PollinationMessage<A>> {
+        // TODO: request_membership handling
 
+        if let Some(patch) = message.patch {
+            let membership_hash = MembershipHash::new(&self.core_map);
+            let mut updated_core = self.core_map.clone();
+            let (added, removed) = updated_core.apply(patch); // TODO: Use these
 
-        if message.membership_hash == MembershipHash::new(&self.core_map) {
+            if find_id(&updated_core, self.uuid()).is_some() {
+                if MembershipHash::new(&updated_core) != message.membership_hash {
+                    // Definitely unclean update; memberhsip hash mismatch
+                    todo!()
+                } else {
+                    // Assume clean
+                    // TODO: Are there edge cases?
+                    self.core_map = updated_core;
+                    Some(self.update_message(&message.timestamp))
+                }
+            } else {
+                // Definitely unclean update; removed self
+                todo!()
+            }
+        } else {
+            if &message.timestamp == self.timestamp() {
+                let membership_hash = MembershipHash::new(&self.core_map);
+                if membership_hash == message.membership_hash {
+                    None
+                } else {
+                    match message.unique_count.cmp(&self.unique_count()) {
+                        Ordering::Greater => Some(self.new_member_message()),
+                        Ordering::Less => Some(self.heartbeat_message()),
+                        Ordering::Equal => {
+                            if message.membership_hash > membership_hash {
+                                Some(self.new_member_message())
+                            } else {
+                                Some(self.heartbeat_message())
+                            }
+                        }
+                    }
+                }
+            } else {
+                Some(self.update_message(&message.timestamp))
+            }
+        }
+
+        /*
+        if message.membership_hash == membership_hash {
             match message.timestamp.partial_cmp(&self.timestamp()) {
                 Some(Ordering::Greater) => {
 
 
-                    self.heartbeat_message()
+                    Some(self.heartbeat_message())
                 }
                 Some(Ordering::Less) => {
-                    self.update_message(&message.timestamp)
+                    Some(self.update_message(&message.timestamp))
                 }
                 Some(Ordering::Equal) => {
                     None
@@ -126,16 +163,19 @@ where
                 None => {
 
 
-                    self.update_message(&message.timestamp)
+                    Some(self.update_message(&message.timestamp))
                 }
             }
         } else {
             todo!()
         }
+        */
     }
 
     /// Apply a CLEAN update with checks.
     fn apply_update(&mut self, message: PollinationMessage<A>) -> Option<PollinationMessage<A>> {
+        todo!()
+        /*
         // TODO: inefficient clone
         let core_copy = self.core_map.clone();
 
@@ -168,13 +208,15 @@ where
             false
         }
         //core_copy.apply(message.patch
+        */
     }
 }
 
-fn find_id<A>(map: &ItcMap<NodeInfo<A>>, uuid: Uuid) -> Option<Id> {
+fn find_id<A>(map: &ItcMap<NodeInfo<A>>, uuid: Uuid) -> Option<IdTree> {
     map.iter()
-        .find(|(_, info) info.uuid == uuid)
-        .map(|(id, _) id)
+        .find(|(_, info)| info.uuid == uuid)
+        .map(|(id, _)| id)
+        .cloned()
 }
 
 // PollinationMessage
@@ -219,7 +261,7 @@ enum NodeStatus {
 // MembershipHash
 use simplehash::fnv1a_64;
 
-#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
 struct MembershipHash(u64);
 
 impl MembershipHash {
@@ -227,9 +269,9 @@ impl MembershipHash {
         let hash = itc_map.map_recursive(
             &|node: &NodeInfo<A>| fnv1a_64(node.uuid.as_bytes()),
             &|l, r| {
-                let mut bytes = [0u8; 32];
-                bytes[..16].copy_from_slice(&l.to_le_bytes());
-                bytes[16..].copy_from_slice(&r.to_le_bytes());
+                let mut bytes = [0u8; 16];
+                bytes[..8].copy_from_slice(&l.to_le_bytes());
+                bytes[8..].copy_from_slice(&r.to_le_bytes());
                 fnv1a_64(&bytes)
             },
         );
@@ -242,6 +284,7 @@ impl MembershipHash {
 mod tests {
     use super::*;
 
+    #[test]
     fn test_membership_hashing() {
         let mut m0 = ItcMap::new();
         let mut m1 = ItcMap::new();

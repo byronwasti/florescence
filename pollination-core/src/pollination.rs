@@ -95,8 +95,10 @@ where
     }
 
     fn create_patch(&self, peer_ts: &EventTree) -> BinaryPatch {
-        let itc_patch: Patch<PeerInfo<A>> = self.core_map.diff(peer_ts);
-        BinaryPatch::new(itc_patch).expect("Error serializing patch")
+        // TODO: This unwrap is bad
+        let itc_patch: Patch<PeerInfo<A>> = self.core_map.diff(peer_ts).unwrap();
+        // BinaryPatch::new(itc_patch).expect("Error serializing patch")
+        todo!()
     }
 
     /// NOTE: Not a clean swap; the new core has most information
