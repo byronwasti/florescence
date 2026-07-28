@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::HashSet};
+use thiserror::Error;
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 use uuid::Uuid;
 
@@ -35,12 +36,18 @@ where
     }
 
     pub fn unique_count(&self) -> usize {
+        // TODO: Efficiency
         let unique_count = self
             .core_map
             .iter()
             .map(|(_, n)| n.uuid)
             .collect::<HashSet<_>>();
         unique_count.len()
+    }
+
+    pub fn membership_hash(&self) -> MembershipHash {
+        // TODO: Efficiency
+        MembershipHash::new(&self.core_map)
     }
 
     pub fn heartbeat_message(&self) -> PollinationMessage<A> {
@@ -54,8 +61,13 @@ where
             membership_hash,
             unique_count,
             patch: None,
-            request_membership: false,
+            new_membership: NewMembership::None,
         }
+    }
+
+    // Insert value at IdTree location, returning removed IdTrees and their values.
+    fn insert(&mut self, id: IdTree, value: NodeInfo<A>) -> Vec<(IdTree, NodeInfo<A>)> {
+        self.core_map.insert(id, value)
     }
 
     // NOTE: Degrades to be heartbeat_message() if the timestamps are equal
@@ -68,7 +80,13 @@ where
     fn new_member_message(&self) -> PollinationMessage<A> {
         // Include all of our peers to be included as well
         let mut msg = self.update_message(&EventTree::new());
-        msg.request_membership = true;
+        msg.new_membership = NewMembership::Request;
+        msg
+    }
+
+    fn provide_member_message(&self) -> PollinationMessage<A> {
+        let mut msg = self.update_message(&EventTree::new());
+        msg.new_membership = NewMembership::Provide;
         msg
     }
 
@@ -98,21 +116,91 @@ where
         }
     }
 
+    fn handle_skew(&self, message: PollinationMessage<A>) -> PollinationMessage<A> {
+        match message.unique_count.cmp(&self.unique_count()) {
+            Ordering::Greater => self.new_member_message(),
+            Ordering::Less => self.heartbeat_message(),
+            Ordering::Equal => {
+                if message.membership_hash > self.membership_hash() {
+                    self.new_member_message()
+                } else {
+                    self.heartbeat_message()
+                }
+            }
+        }
+    }
+
+    fn handle_new_members(
+        &mut self,
+        message: PollinationMessage<A>,
+    ) -> Result<Option<PollinationMessage<A>>> {
+        if self.membership_hash() == message.membership_hash {
+            return Ok(None);
+        }
+
+        if self.unique_count() < message.unique_count {
+            // TODO: I _think_ this can actually end up in a live-lock situation. So, probably fix
+            // that.
+            return Ok(None);
+        }
+
+        // A PollinationMessage with NewMembership::Request can be assumed to have the full ITCMap
+        // as part of the request.
+        // TODO: Proper error handling
+        let peer_map: ItcMap<NodeInfo<A>> =
+            ItcMap::from_patch(message.patch.ok_or(PollinationError::NoPatch)?);
+
+        let mut peers = vec![];
+        for (_, node) in peer_map.iter() {
+            // TODO: Horribly inefficient; does it matter?
+            if find_id(&self.core_map, node.uuid).is_some() {
+                continue;
+            }
+
+            peers.push(node.clone());
+        }
+
+        if peers.is_empty() {
+            Ok(None)
+        } else {
+            self.add_peers(peers);
+            Ok(Some(self.provide_member_message()))
+        }
+    }
+
+    fn handle_provided_membership(
+        &mut self,
+        message: PollinationMessage<A>,
+    ) -> PollinationMessage<A> {
+        todo!()
+    }
+
     pub fn handle_message(
         &mut self,
         message: PollinationMessage<A>,
     ) -> Option<PollinationMessage<A>> {
-        // TODO: request_membership handling
+        if message.new_membership.is_request() {
+            match self.handle_new_members(message.clone()) {
+                Ok(Some(msg)) => return Some(msg),
+                Ok(None) => debug!("Nothing to do for handling new membership"),
+                Err(PollinationError::NoPatch) => {
+                    debug!("No Patch present in NewMembership::Request message")
+                }
+            }
+        }
 
-        if let Some(patch) = message.patch {
-            let membership_hash = MembershipHash::new(&self.core_map);
+        if message.new_membership.is_provide() {
+            return Some(self.handle_provided_membership(message));
+        }
+
+        if let Some(patch) = message.patch.clone() {
             let mut updated_core = self.core_map.clone();
             let (added, removed) = updated_core.apply(patch); // TODO: Use these
 
             if find_id(&updated_core, self.uuid()).is_some() {
                 if MembershipHash::new(&updated_core) != message.membership_hash {
                     // Definitely unclean update; memberhsip hash mismatch
-                    todo!()
+                    Some(self.handle_skew(message))
                 } else {
                     // Assume clean
                     // TODO: Are there edge cases?
@@ -121,94 +209,36 @@ where
                 }
             } else {
                 // Definitely unclean update; removed self
-                todo!()
+                Some(self.handle_skew(message))
             }
         } else {
             if &message.timestamp == self.timestamp() {
-                let membership_hash = MembershipHash::new(&self.core_map);
-                if membership_hash == message.membership_hash {
+                if self.membership_hash() == message.membership_hash {
                     None
                 } else {
-                    match message.unique_count.cmp(&self.unique_count()) {
-                        Ordering::Greater => Some(self.new_member_message()),
-                        Ordering::Less => Some(self.heartbeat_message()),
-                        Ordering::Equal => {
-                            if message.membership_hash > membership_hash {
-                                Some(self.new_member_message())
-                            } else {
-                                Some(self.heartbeat_message())
-                            }
-                        }
-                    }
+                    Some(self.handle_skew(message))
                 }
             } else {
                 Some(self.update_message(&message.timestamp))
             }
         }
-
-        /*
-        if message.membership_hash == membership_hash {
-            match message.timestamp.partial_cmp(&self.timestamp()) {
-                Some(Ordering::Greater) => {
-
-
-                    Some(self.heartbeat_message())
-                }
-                Some(Ordering::Less) => {
-                    Some(self.update_message(&message.timestamp))
-                }
-                Some(Ordering::Equal) => {
-                    None
-                }
-                None => {
-
-
-                    Some(self.update_message(&message.timestamp))
-                }
-            }
-        } else {
-            todo!()
-        }
-        */
     }
 
-    /// Apply a CLEAN update with checks.
-    fn apply_update(&mut self, message: PollinationMessage<A>) -> Option<PollinationMessage<A>> {
-        todo!()
-        /*
-        // TODO: inefficient clone
-        let core_copy = self.core_map.clone();
+    // Evenly divide the Self address space and distribute to peers. Then, assign every nodes
+    // information to the map.
+    fn add_peers(&mut self, mut peers: Vec<NodeInfo<A>>) {
+        let mut new_ids = self.id.clone().fork_many(peers.len() + 1);
+        self.id = new_ids[0].clone();
+        self.insert(new_ids[0].clone(), self.own_info.clone());
 
-        if let Some(patch) = message.patch {
-            core_copy.apply(patch.clone());
+        assert_eq!(new_ids.len(), peers.len() + 1);
 
-            if MembershipHash::new(&core_copy) != message.membership_hash {
-                // Attempt a fresh patch
-                let core_new = ItcMap::from_patch(patch.clone());
-                if let Some(id) = find_id(core_new, self.uuid()) {
-                }
-            } else {
-                // MembershipHash is equal, but this could be because our tree has been completely
-                // overridden. So, check to see if we're in it.
-                if let Some(id) = find_id(core_new, self.uuid()) {
-                } else {
-                    // We are not in the map, so now check to see if we should request to be
-                    // included in the other map.
-                    match message.unique_count.cmp(self.unique_count()) {
-                        Ordering::Greater => {
-                            self.include_me_message()
-                        }
-                        Ordering::Less => {
-                            self.update_message()
-                        }
-                    }
-                }
-            }
-        } else {
-            false
+        for (new_id, info) in new_ids.drain(1..).zip(peers.drain(..)) {
+            let removals = self.insert(new_id, info);
+            // There should be no removals, as inserting our own info should have removed ourselves
+            // already.
+            assert!(removals.is_empty());
         }
-        //core_copy.apply(message.patch
-        */
     }
 }
 
@@ -221,6 +251,7 @@ fn find_id<A>(map: &ItcMap<NodeInfo<A>>, uuid: Uuid) -> Option<IdTree> {
 
 // PollinationMessage
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PollinationMessage<A> {
     uuid: Uuid,
     id: IdTree,
@@ -228,12 +259,43 @@ pub struct PollinationMessage<A> {
     membership_hash: MembershipHash,
     unique_count: usize,
     patch: Option<Patch<NodeInfo<A>>>,
-    request_membership: bool,
+    new_membership: NewMembership,
 }
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+enum NewMembership {
+    None,
+    Request,
+    Provide,
+}
+
+impl NewMembership {
+    fn is_none(&self) -> bool {
+        matches!(self, NewMembership::None)
+    }
+
+    fn is_request(&self) -> bool {
+        matches!(self, NewMembership::Request)
+    }
+
+    fn is_provide(&self) -> bool {
+        matches!(self, NewMembership::Provide)
+    }
+}
+
+// Error & Result
+
+#[derive(Debug, Error)]
+pub enum PollinationError {
+    #[error("No patch present when one was expected")]
+    NoPatch,
+}
+
+pub type Result<T> = std::result::Result<T, PollinationError>;
 
 // NodeInfo
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct NodeInfo<A> {
     uuid: Uuid,
     addr: A,
@@ -252,7 +314,7 @@ impl<A> NodeInfo<A> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum NodeStatus {
     Healthy,
     Dead,
@@ -261,7 +323,7 @@ enum NodeStatus {
 // MembershipHash
 use simplehash::fnv1a_64;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy, Serialize, Deserialize)]
 struct MembershipHash(u64);
 
 impl MembershipHash {

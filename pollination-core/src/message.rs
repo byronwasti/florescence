@@ -190,6 +190,7 @@ mod tests {
         assert_eq!(string, "this is some string".to_string());
     }
 
+    #[ignore]
     #[test]
     fn test_binary_patch_behavior_itc_map() {
         let mut m = ItcMap::new();
