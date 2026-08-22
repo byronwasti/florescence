@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, collections::HashSet};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+    mem,
+};
 use thiserror::Error;
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 use uuid::Uuid;
@@ -138,17 +142,18 @@ where
             return Ok(None);
         }
 
-        if self.unique_count() < message.unique_count {
-            // TODO: I _think_ this can actually end up in a live-lock situation. So, probably fix
-            // that.
-            return Ok(None);
-        }
-
-        // A PollinationMessage with NewMembership::Request can be assumed to have the full ITCMap
+        // A PollinationMessage with NewMembership::Request can be assumed to have the full ItcMap
         // as part of the request.
         // TODO: Proper error handling
         let peer_map: ItcMap<NodeInfo<A>> =
             ItcMap::from_patch(message.patch.ok_or(PollinationError::NoPatch)?);
+
+        let (a, b) = unique_diff_count(&self.core_map, &peer_map);
+        if a < b {
+            // NOTE: I think this can actually end up in a live-lock situation, but probably
+            // too rare to be a problem.
+            return Ok(None);
+        }
 
         let mut peers = vec![];
         for (_, node) in peer_map.iter() {
@@ -171,8 +176,48 @@ where
     fn handle_provided_membership(
         &mut self,
         message: PollinationMessage<A>,
-    ) -> PollinationMessage<A> {
-        todo!()
+    ) -> Result<Option<PollinationMessage<A>>> {
+        if self.membership_hash() == message.membership_hash {
+            return Ok(None);
+        }
+
+        let peer_map: ItcMap<NodeInfo<A>> =
+            ItcMap::from_patch(message.patch.ok_or(PollinationError::NoPatch)?);
+
+        let (a, b) = unique_diff_count(&self.core_map, &peer_map);
+        if a > b {
+            return Ok(None);
+        }
+
+        if let Some(new_id) = find_id(&peer_map, self.uuid()) {
+            // Swap identities to the new map
+            let mut new_self = PollinationCore {
+                id: new_id,
+                core_map: peer_map,
+                own_info: self.own_info.clone(),
+            };
+            mem::swap(self, &mut new_self);
+            let old_self = new_self;
+
+            // Add peers not present in the current ItcMap to the Map
+            let mut non_present = non_present(&old_self.core_map, &self.core_map);
+            let mut new_ids = self.id.clone().fork_many(non_present.len() + 1);
+            let mut new_ids = new_ids.drain(..);
+
+            self.id = new_ids.next().expect("fork_many bug");
+            let removed = self.core_map.insert(self.id.clone(), self.own_info.clone());
+            assert_eq!(removed.len(), 1);
+
+            for non_present in non_present.drain(..) {
+                let id = new_ids.next().expect("fork_many bug");
+                let removed = self.core_map.insert(id, non_present);
+                assert_eq!(removed.len(), 0);
+            }
+
+            return Ok(Some(self.update_message(&message.timestamp)));
+        } else {
+            return Err(PollinationError::NoSelf);
+        }
     }
 
     pub fn handle_message(
@@ -182,15 +227,25 @@ where
         if message.new_membership.is_request() {
             match self.handle_new_members(message.clone()) {
                 Ok(Some(msg)) => return Some(msg),
-                Ok(None) => debug!("Nothing to do for handling new membership"),
-                Err(PollinationError::NoPatch) => {
-                    debug!("No Patch present in NewMembership::Request message")
+                Ok(None) => debug!("Nothing to do for handling requested new membership"),
+                Err(err) => {
+                    error!("{err}");
+                    // TODO: Remove panic
+                    panic!("Bug present in requested membership route")
                 }
             }
         }
 
         if message.new_membership.is_provide() {
-            return Some(self.handle_provided_membership(message));
+            match self.handle_provided_membership(message.clone()) {
+                Ok(Some(msg)) => return Some(msg),
+                Ok(None) => debug!("Nothing to do for handling provided membership"),
+                Err(err) => {
+                    error!("{err}");
+                    // TODO: Remove panic
+                    panic!("Bug present in provided membership route")
+                }
+            }
         }
 
         if let Some(patch) = message.patch.clone() {
@@ -249,6 +304,65 @@ fn find_id<A>(map: &ItcMap<NodeInfo<A>>, uuid: Uuid) -> Option<IdTree> {
         .cloned()
 }
 
+fn non_present<A>(map_a: &ItcMap<NodeInfo<A>>, map_b: &ItcMap<NodeInfo<A>>) -> Vec<NodeInfo<A>>
+where
+    NodeInfo<A>: Clone,
+{
+    let entries_a = map_a
+        .iter()
+        .map(|(_, d)| (d.uuid, d))
+        .collect::<HashMap<_, _>>();
+    let entries_b = map_b
+        .iter()
+        .map(|(_, d)| (d.uuid, d))
+        .collect::<HashMap<_, _>>();
+
+    entries_a
+        .iter()
+        .filter_map(|(uuid, &d0)| {
+            if !entries_b.contains_key(uuid) {
+                Some((*d0).to_owned())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn unique_diff_count<A>(map_a: &ItcMap<NodeInfo<A>>, map_b: &ItcMap<NodeInfo<A>>) -> (i64, i64) {
+    let entries_a = map_a
+        .iter()
+        .map(|(_, d)| (d.uuid, d.timestamp))
+        .collect::<HashMap<_, _>>();
+    let entries_b = map_b
+        .iter()
+        .map(|(_, d)| (d.uuid, d.timestamp))
+        .collect::<HashMap<_, _>>();
+
+    let diff_a = entries_a
+        .iter()
+        .filter(|(d0, t0)| {
+            if let Some(t1) = entries_b.get(d0) {
+                *t0 > t1
+            } else {
+                true
+            }
+        })
+        .count() as i64;
+    let diff_b = entries_b
+        .iter()
+        .filter(|(d0, t0)| {
+            if let Some(t1) = entries_a.get(d0) {
+                *t0 > t1
+            } else {
+                true
+            }
+        })
+        .count() as i64;
+
+    (diff_a, diff_b)
+}
+
 // PollinationMessage
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,6 +374,22 @@ pub struct PollinationMessage<A> {
     unique_count: usize,
     patch: Option<Patch<NodeInfo<A>>>,
     new_membership: NewMembership,
+}
+
+impl<A: std::fmt::Debug> std::fmt::Display for PollinationMessage<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "PollinationMessage {{ uuid: {0}, id: {1}, timestamp: {2}, membership_hash: {3}, unique_count: {4}, patch: {5:?}, new_membership: {6:?} }}",
+            self.uuid,
+            self.id,
+            self.timestamp,
+            self.membership_hash.0,
+            self.unique_count,
+            self.patch,
+            self.new_membership,
+        )
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -289,6 +419,9 @@ impl NewMembership {
 pub enum PollinationError {
     #[error("No patch present when one was expected")]
     NoPatch,
+
+    #[error("No self present in the ItcMap")]
+    NoSelf,
 }
 
 pub type Result<T> = std::result::Result<T, PollinationError>;
@@ -345,6 +478,7 @@ impl MembershipHash {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::uuid;
 
     #[test]
     fn test_membership_hashing() {
@@ -368,5 +502,24 @@ mod tests {
         let h1 = MembershipHash::new(&m1);
 
         assert_ne!(h0, h1);
+    }
+
+    #[test]
+    fn test_basic_sync_0() {
+        let mut pc0 = PollinationCore::new(uuid!("6008eb2a-7387-41d6-976d-6c66904d19c6"), 0);
+        let mut pc1 = PollinationCore::new(uuid!("eb06c0df-c501-4800-852e-a9f619cd8163"), 1);
+
+        let msg = pc0.heartbeat_message();
+        println!("{msg}");
+        let msg = pc1.handle_message(msg).expect("Message");
+        println!("{msg}");
+        let msg = pc0.handle_message(msg).expect("Message");
+        println!("{msg}");
+        let msg = pc1.handle_message(msg).expect("Message");
+        println!("{msg}");
+        let msg = pc0.handle_message(msg).expect("Message");
+        println!("{msg}");
+        let msg = pc1.handle_message(msg).expect("Message");
+        println!("{msg}");
     }
 }
