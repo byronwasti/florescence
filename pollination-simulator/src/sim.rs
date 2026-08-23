@@ -46,9 +46,14 @@ impl<S: Simulee> Sim<S> {
 
     fn step_inner(&mut self) -> HistoricalRecord<S> {
         let nodes = self.random_ordering();
-        for node in nodes {
-            let node = self.nodes.node_weight_mut(node).expect("Node to exist");
-            match node.step(&mut self.rng, self.history.wall_time(), &self.config) {
+        for node in nodes.iter() {
+            let node = self.nodes.node_weight_mut(*node).expect("Node to exist");
+            match node.step(
+                &mut self.rng,
+                self.history.wall_time(),
+                &self.config,
+                &nodes,
+            ) {
                 Ok(record) => {
                     return HistoricalRecord::NodeEvent(record);
                 }
@@ -80,6 +85,10 @@ impl<S: Simulee> Sim<S> {
 
     pub fn nodes(&self) -> impl Iterator<Item = &SimNode<S>> {
         self.nodes.node_weights()
+    }
+
+    pub fn node_ids(&self) -> Vec<NodeIndex> {
+        self.nodes.node_weights().map(|x| x.id).collect()
     }
 }
 

@@ -29,6 +29,7 @@ impl<S: Simulee> SimNode<S> {
         rng: &mut R,
         wall_time: u64,
         config: &Config<S::Config>,
+        nodes: &[NodeIndex],
     ) -> Result<NodeRecord<S>, SimNodeError> {
         // Before doing anything, we want to snapshot the node as-is.
         let snapshot = self
@@ -47,7 +48,7 @@ impl<S: Simulee> SimNode<S> {
         let res = panic::catch_unwind(move || {
             // Can't pass an Rng across the unwind boundary, so just reseed a new one.
             let mut rng = StdRng::seed_from_u64(seed);
-            let res = simulee.step(&mut rng, &config, wall_time, &mut delivery);
+            let res = simulee.step(&mut rng, &config, nodes, wall_time, &mut delivery);
             (simulee, delivery, res)
         })
         .map_err(|err| {

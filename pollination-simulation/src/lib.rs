@@ -7,6 +7,8 @@ use rand::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub mod core;
+
 #[derive(Debug, Clone)]
 pub struct SimulatedPollinationNode {
     inner: PollinationNode<NodeIndex>,
@@ -37,6 +39,7 @@ impl Simulee for SimulatedPollinationNode {
         &mut self,
         rng: &mut R,
         config: &Config<Self::Config>,
+        nodes: &[NodeIndex],
         wall_time: u64,
         delivery: &mut Option<Delivery<Self::Message>>,
     ) -> Option<(Self::HistoricalEvent, Vec<(NodeIndex, Self::Message)>)> {

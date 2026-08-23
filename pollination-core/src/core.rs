@@ -8,6 +8,7 @@ use thiserror::Error;
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 use uuid::Uuid;
 
+#[derive(Debug, Clone)]
 pub struct PollinationCore<A> {
     id: IdTree,
     core_map: ItcMap<NodeInfo<A>>,

@@ -4,7 +4,7 @@ use egui::{
     Color32, Frame, Painter, Pos2, Rect, Scene, ScrollArea, Sense, Shape, Stroke, Ui, Vec2, emath,
     pos2, vec2,
 };
-use pollination_simulation::{PollinationConfig, SimulatedPollinationNode};
+use pollination_simulation::core::{PollinationConfig, SimulatedPollinationCore};
 use pollination_simulator::{Config, Sim, history::HistoricalRecord};
 
 pub struct PollinationViewer {
@@ -25,9 +25,6 @@ impl Default for DurableState {
                 node_count: 5,
                 seed: 1234,
                 custom: PollinationConfig {
-                    timeout_reap: 5,
-                    timeout_heartbeat: 5,
-                    timeout_propagativity: 5,
                     rand_robin_count: 2,
                 },
             },
@@ -36,7 +33,7 @@ impl Default for DurableState {
 }
 
 struct EphemeralState {
-    sim: Sim<SimulatedPollinationNode>,
+    sim: Sim<SimulatedPollinationCore>,
     step: bool,
 }
 

@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate tracing;
 
-mod core;
+pub mod core;
 mod message;
 mod peer_info;
 mod pollination;
