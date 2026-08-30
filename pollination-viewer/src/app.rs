@@ -20,11 +20,13 @@ pub struct PollinationViewer {
 #[serde(default)]
 struct DurableState {
     sim_config: Config<PollinationConfig>,
+    step_count: usize,
 }
 
 impl Default for DurableState {
     fn default() -> DurableState {
         Self {
+            step_count: 1,
             sim_config: Config {
                 node_count: 5,
                 seed: 1234,
@@ -65,8 +67,10 @@ impl eframe::App for PollinationViewer {
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         if self.e.step {
-            println!("Simulation Step");
-            self.e.sim.step();
+            println!("Simulation Step ({}x)", self.d.step_count);
+            for _ in 0..self.d.step_count {
+                self.e.sim.step();
+            }
         }
     }
 
@@ -113,7 +117,7 @@ impl PollinationViewer {
 
     fn draw_history(&self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::Window::new("History").show(ui, |ui| {
-            ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
+            ScrollArea::vertical().stick_to_bottom(true).auto_shrink(true).show(ui, |ui| {
                 let history = self.e.sim.history();
                 ui.label(format!("Event time {}", history.time()));
                 ui.label(format!("Wall time {}", history.wall_time()));
@@ -147,6 +151,8 @@ impl PollinationViewer {
     fn draw_controls(&mut self, ui: &egui::Ui, _frame: &mut eframe::Frame) {
         egui::Window::new("Sim Controls").show(ui, |ui| {
             ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
+                ui.add(egui::Slider::new(&mut self.d.step_count, 0..=10000).text("Step Count"));
+
                 self.e.step = ui.button("Step").clicked();
                 if let Some(panic) = self.e.sim.panic_msg() {
                     ui.label(format!("PANIC {panic}"));
@@ -175,8 +181,8 @@ impl PollinationViewer {
                                 let membership_hash = node.inner().membership_hash();
                                 let timestamp = node.inner().timestamp();
                                 (
-                                    hashable_to_color(membership_hash),
                                     hashable_to_color(timestamp),
+                                    hashable_to_color(membership_hash),
                                 )
                             })
                     )

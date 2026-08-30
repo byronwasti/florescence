@@ -28,6 +28,15 @@ impl<S: Simulee> SimNode<S> {
         self.simulee.as_ref().expect("Expected simulee")
     }
 
+    pub fn push_mailbox<R: Rng + ?Sized>(
+        &mut self,
+        rng: &mut R,
+        from: NodeIndex,
+        message: S::Message,
+    ) {
+        self.mailbox.push(rng, from, message);
+    }
+
     pub fn step<R: Rng + ?Sized>(
         &mut self,
         rng: &mut R,
@@ -43,6 +52,7 @@ impl<S: Simulee> SimNode<S> {
             .clone();
 
         let mut delivery = self.mailbox.get_delivery();
+
         let mut simulee = self
             .simulee
             .take()
@@ -74,7 +84,7 @@ impl<S: Simulee> SimNode<S> {
             if delivered {
                 Some(mail)
             } else {
-                self.mailbox.push(mail);
+                self.mailbox.push_mail(mail);
                 None
             }
         } else {

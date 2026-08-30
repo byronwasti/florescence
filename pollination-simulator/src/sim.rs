@@ -39,6 +39,7 @@ impl<S: Simulee> Sim<S> {
             return Err(SimError::Panic(panic_msg.clone()));
         }
         let record = self.step_inner();
+        self.propagate_events(&record);
         self.history.record(record);
 
         Ok(())
@@ -67,6 +68,17 @@ impl<S: Simulee> Sim<S> {
         }
 
         HistoricalRecord::NoEvent
+    }
+
+    fn propagate_events(&mut self, record: &HistoricalRecord<S>) {
+        let HistoricalRecord::NodeEvent(record) = record else {
+            return;
+        };
+
+        for (id, msg) in record.msgs_out.iter() {
+            let node = self.nodes.node_weight_mut(*id).expect("Node to exist");
+            node.push_mailbox(&mut self.rng, record.id, msg.clone());
+        }
     }
 
     fn random_ordering(&mut self) -> Vec<NodeIndex> {

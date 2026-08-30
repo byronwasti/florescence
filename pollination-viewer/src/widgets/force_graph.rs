@@ -20,6 +20,7 @@ impl Widget for ForceGraphWidget<'_> {
         let response = ui.allocate_response(ui.available_size(), Sense::hover());
         let painter = ui.painter().with_clip_rect(ui.clip_rect());
 
+        // TODO: Move simulation to a "logic" step
         let (pos_map, fixed) = self.position_map(ui, &response);
         self.graph.run_force_simulation(self.config, &fixed);
 
@@ -113,7 +114,7 @@ impl<'a> ForceGraphWidget<'a> {
             };
 
             painter.add(Shape::circle_filled(pos_map[idx], 15., ring_color));
-            painter.add(Shape::circle_filled(pos_map[idx], 10., node_color));
+            painter.add(Shape::circle_filled(pos_map[idx], 13., node_color));
             /*
             ui.ctx().fonts_mut(|font_view| {
                 painter.add(Shape::text(

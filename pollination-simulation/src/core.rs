@@ -51,7 +51,7 @@ impl Simulee for SimulatedPollinationCore {
         weights.push(2);
 
         events.push(StepOptions::Skip);
-        weights.push(50);
+        weights.push(2);
 
         let dist = WeightedIndex::new(&weights).expect("Invalid random weights");
         let event = events[dist.sample(rng)];

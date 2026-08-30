@@ -14,7 +14,11 @@ impl<Message> Mailbox<Message> {
         }
     }
 
-    pub fn push(&mut self, mail: Mail<Message>) {
+    pub fn push<R: Rng + ?Sized>(&mut self, rng: &mut R, from: NodeIndex, msg: Message) {
+        self.inner.push(Mail::new(rng, from, msg));
+    }
+
+    pub fn push_mail(&mut self, mail: Mail<Message>) {
         self.inner.push(mail);
     }
 
@@ -28,6 +32,7 @@ impl<Message> Mailbox<Message> {
     }
 }
 
+#[derive(Debug)]
 pub struct Delivery<Message> {
     delivered: bool,
     mail: Mail<Message>,
