@@ -28,7 +28,7 @@ impl Default for DurableState {
         Self {
             step_count: 1,
             sim_config: Config {
-                node_count: 5,
+                node_count: 3,
                 seed: 1234,
                 custom: PollinationConfig {
                     rand_robin_count: 2,
@@ -151,8 +151,14 @@ impl PollinationViewer {
     fn draw_controls(&mut self, ui: &egui::Ui, _frame: &mut eframe::Frame) {
         egui::Window::new("Sim Controls").show(ui, |ui| {
             ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
-                ui.add(egui::Slider::new(&mut self.d.step_count, 0..=10000).text("Step Count"));
+                ui.add(egui::Slider::new(&mut self.d.sim_config.node_count, 0..=25).text("Node count"));
+                if ui.button("Reset").clicked() {
+                    self.e = EphemeralState::new(&self.d);
+                }
 
+                ui.separator();
+
+                ui.add(egui::Slider::new(&mut self.d.step_count, 0..=10000).text("Step Count"));
                 self.e.step = ui.button("Step").clicked();
                 if let Some(panic) = self.e.sim.panic_msg() {
                     ui.label(format!("PANIC {panic}"));
@@ -189,21 +195,29 @@ impl PollinationViewer {
                                 let Some(node) = self.e.sim.get_node(id) else {
                                     return;
                                 };
+                                egui::ScrollArea::vertical()
+                                    .auto_shrink(true)
+                                    .show(ui, |ui| {
+                                        ui.label(format!("Node Index: {}", node.id.index()));
+                                        ui.label(format!(
+                                            "Membership Hash: {:?}",
+                                            node.inner().membership_hash()
+                                        ));
 
-                                ui.label(format!("Node Index: {}", node.id.index()));
-                                ui.label(format!(
-                                    "Membership Hash: {:?}",
-                                    node.inner().membership_hash()
-                                ));
+                                        ui.collapsing("State", |ui| {
+                                            let node = node.inner().inner();
+                                            ui.label(format!("UUID: {}", node.uuid()));
+                                            ui.label(format!("ItcId: {}", node.id()));
+                                            ui.label(format!("Timestamp: {}", node.timestamp()));
+                                            ui.label(format!("Own Info: {:?}", node.own_info()));
+                                            ui.collapsing("Map", |ui| {
+                                                for (id, d) in node.core_map().iter() {
+                                                    ui.label(format!("{id} -> {d:?}"));
+                                                }
+                                            });
+                                        });
 
-                                ui.collapsing("State", |ui| {
-                                    ui.label(format!("{:?}", node.inner().inner()))
-                                });
-
-                                ui.collapsing("Mailbox", |ui| {
-                                    egui::ScrollArea::vertical()
-                                        .auto_shrink(true)
-                                        .show(ui, |ui| {
+                                        ui.collapsing("Mailbox", |ui| {
                                             for mail in node.mailbox.iter() {
                                                 ui.label(format!(
                                                     "{} -> {:?}",
@@ -212,7 +226,7 @@ impl PollinationViewer {
                                                 ));
                                             }
                                         });
-                                });
+                                    });
                             }),
                     )
                 });

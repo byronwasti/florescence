@@ -10,6 +10,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct SimulatedPollinationCore {
     inner: PollinationCore<NodeIndex>,
+    first_heartbeat: bool,
 }
 
 impl SimulatedPollinationCore {
@@ -33,7 +34,10 @@ impl Simulee for SimulatedPollinationCore {
 
     fn new<R: Rng + ?Sized>(rng: &mut R, _config: &Config<Self::Config>, id: NodeIndex) -> Self {
         let inner = PollinationCore::new(Uuid::from_u128(rng.random()), id);
-        Self { inner }
+        Self {
+            inner,
+            first_heartbeat: false,
+        }
     }
 
     #[allow(clippy::type_complexity)]
@@ -52,7 +56,12 @@ impl Simulee for SimulatedPollinationCore {
         weights.push(100);
 
         events.push(StepOptions::Heartbeat);
-        weights.push(2);
+        weights.push(if !self.first_heartbeat {
+            self.first_heartbeat = true;
+            200
+        } else {
+            2
+        });
 
         events.push(StepOptions::Skip);
         weights.push(2);
@@ -63,6 +72,7 @@ impl Simulee for SimulatedPollinationCore {
         match event {
             StepOptions::Skip => None,
             StepOptions::Heartbeat => {
+                self.inner.increment();
                 let msg = self.inner.heartbeat_message();
 
                 let msgs = nodes

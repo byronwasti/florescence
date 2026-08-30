@@ -36,8 +36,22 @@ where
         self.core_map.timestamp()
     }
 
+    pub fn id(&self) -> &IdTree {
+        &self.id
+    }
+
     pub fn uuid(&self) -> Uuid {
         self.own_info.uuid
+    }
+
+    /// For diagnostic purposes
+    pub fn own_info(&self) -> &NodeInfo<A> {
+        &self.own_info
+    }
+
+    /// For diagnostic purposes
+    pub fn core_map(&self) -> &ItcMap<NodeInfo<A>> {
+        &self.core_map
     }
 
     pub fn unique_count(&self) -> usize {
@@ -53,6 +67,13 @@ where
     pub fn membership_hash(&self) -> MembershipHash {
         // TODO: Efficiency
         MembershipHash::new(&self.core_map)
+    }
+
+    /// Increment the logical timestamp associated with this nodes data.
+    pub fn increment(&mut self) {
+        self.own_info.timestamp += 1;
+        let removals = self.insert(self.id.clone(), self.own_info().clone());
+        assert_eq!(removals.len(), 1);
     }
 
     pub fn heartbeat_message(&self) -> PollinationMessage<A> {
@@ -214,6 +235,8 @@ where
                 let removed = self.core_map.insert(id, non_present);
                 assert_eq!(removed.len(), 0);
             }
+
+            self.increment();
 
             return Ok(Some(self.update_message(&message.timestamp)));
         } else {
@@ -430,7 +453,7 @@ pub type Result<T> = std::result::Result<T, PollinationError>;
 // NodeInfo
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct NodeInfo<A> {
+pub struct NodeInfo<A> {
     uuid: Uuid,
     addr: A,
     timestamp: u64,
