@@ -83,6 +83,14 @@ impl<S: Simulee> Sim<S> {
         self.panic_msg.as_deref()
     }
 
+    pub fn get_node(&self, idx: NodeIndex) -> Option<&SimNode<S>> {
+        self.nodes.node_weight(idx)
+    }
+
+    pub fn graph(&self) -> &StableGraph<SimNode<S>, ()> {
+        &self.nodes
+    }
+
     pub fn nodes(&self) -> impl Iterator<Item = &SimNode<S>> {
         self.nodes.node_weights()
     }

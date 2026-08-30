@@ -1,4 +1,4 @@
-use pollination::core::*;
+use pollination::{EventTree, core::*};
 use pollination_simulator::{Config, Delivery, NodeIndex, Simulee};
 use rand::{
     distr::{Distribution, weighted::WeightedIndex},
@@ -10,6 +10,16 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct SimulatedPollinationCore {
     inner: PollinationCore<NodeIndex>,
+}
+
+impl SimulatedPollinationCore {
+    pub fn membership_hash(&self) -> MembershipHash {
+        self.inner.membership_hash()
+    }
+
+    pub fn timestamp(&self) -> &EventTree {
+        self.inner.timestamp()
+    }
 }
 
 impl Simulee for SimulatedPollinationCore {
@@ -61,7 +71,7 @@ impl Simulee for SimulatedPollinationCore {
                 Some((PollinationEvent::Heartbeat, msgs))
             }
             StepOptions::HandleMessage => {
-                let mail = delivery.as_mut().expect("Delivery to be Some").take();
+                let mail = delivery.as_mut()?.take();
                 let from = mail.from;
                 let msg = mail.msg;
 

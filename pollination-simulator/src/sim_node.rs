@@ -24,6 +24,10 @@ impl<S: Simulee> SimNode<S> {
         }
     }
 
+    pub fn inner(&self) -> &S {
+        self.simulee.as_ref().expect("Expected simulee")
+    }
+
     pub fn step<R: Rng + ?Sized>(
         &mut self,
         rng: &mut R,

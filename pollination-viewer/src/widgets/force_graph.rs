@@ -114,7 +114,8 @@ impl<'a> ForceGraphWidget<'a> {
 
             painter.add(Shape::circle_filled(pos_map[idx], 15., ring_color));
             painter.add(Shape::circle_filled(pos_map[idx], 10., node_color));
-            ui.ctx().fonts(|font_view| {
+            /*
+            ui.ctx().fonts_mut(|font_view| {
                 painter.add(Shape::text(
                     font_view,
                     pos_map[idx],
@@ -124,6 +125,7 @@ impl<'a> ForceGraphWidget<'a> {
                     self.config.node_color,
                 ));
             })
+            */
         }
     }
 }

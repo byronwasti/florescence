@@ -6,10 +6,14 @@ use egui::{
 };
 use pollination_simulation::core::{PollinationConfig, SimulatedPollinationCore};
 use pollination_simulator::{Config, Sim, history::HistoricalRecord};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
 
 pub struct PollinationViewer {
-    durable: DurableState,
-    ephemeral: EphemeralState,
+    d: DurableState,
+    e: EphemeralState,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -35,30 +39,42 @@ impl Default for DurableState {
 struct EphemeralState {
     sim: Sim<SimulatedPollinationCore>,
     step: bool,
+    scene: Rect,
+    force_graph_state: ForceGraph,
+    force_graph_config: ForceGraphConfig,
 }
 
 impl EphemeralState {
     fn new(saved: &DurableState) -> Self {
+        let sim = Sim::new(saved.sim_config.clone());
+        let force_graph_state = ForceGraph::from_graph(sim.graph());
         Self {
-            sim: Sim::new(saved.sim_config.clone()),
+            sim,
             step: false,
+            scene: Rect::ZERO,
+            force_graph_state,
+            force_graph_config: ForceGraphConfig::default(),
         }
     }
 }
 
 impl eframe::App for PollinationViewer {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, eframe::APP_KEY, &self.durable)
+        eframe::set_value(storage, eframe::APP_KEY, &self.d)
     }
 
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        if self.ephemeral.step {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if self.e.step {
             println!("Simulation Step");
-            self.ephemeral.sim.step();
+            self.e.sim.step();
         }
-        self.draw_header(ctx, frame);
-        self.draw_history(ctx, frame);
-        self.draw_controls(ctx, frame);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.draw_header(ui, frame);
+        self.draw_history(ui, frame);
+        self.draw_controls(ui, frame);
+        self.draw_scene(ui, frame);
     }
 }
 
@@ -71,20 +87,20 @@ impl PollinationViewer {
         };
 
         PollinationViewer {
-            ephemeral: EphemeralState::new(&saved),
-            durable: saved,
+            e: EphemeralState::new(&saved),
+            d: saved,
         }
     }
 
-    fn draw_header(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+    fn draw_header(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        egui::Panel::top("top_panel").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 // No File->Quit on web pages
                 let is_web = cfg!(target_arch = "wasm32");
                 if !is_web {
                     ui.menu_button("File", |ui| {
                         if ui.button("Quit").clicked() {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            ui.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     });
                     ui.add_space(16.0);
@@ -95,10 +111,10 @@ impl PollinationViewer {
         });
     }
 
-    fn draw_history(&self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::Window::new("History").show(ctx, |ui| {
+    fn draw_history(&self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        egui::Window::new("History").show(ui, |ui| {
             ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
-                let history = self.ephemeral.sim.history();
+                let history = self.e.sim.history();
                 ui.label(format!("Event time {}", history.time()));
                 ui.label(format!("Wall time {}", history.wall_time()));
                 for (time, record) in history.records().enumerate() {
@@ -128,14 +144,61 @@ impl PollinationViewer {
         });
     }
 
-    fn draw_controls(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::Window::new("Sim Controls").show(ctx, |ui| {
+    fn draw_controls(&mut self, ui: &egui::Ui, _frame: &mut eframe::Frame) {
+        egui::Window::new("Sim Controls").show(ui, |ui| {
             ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
-                self.ephemeral.step = ui.button("Step").clicked();
-                if let Some(panic) = self.ephemeral.sim.panic_msg() {
+                self.e.step = ui.button("Step").clicked();
+                if let Some(panic) = self.e.sim.panic_msg() {
                     ui.label(format!("PANIC {panic}"));
                 }
             })
         });
     }
+
+    fn draw_scene(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let frame = egui::containers::Frame::new()
+            .inner_margin(egui::Margin::ZERO)
+            .outer_margin(egui::Margin::ZERO);
+
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
+            self.draw_scene_stats(ui);
+
+            let mut rect = self.e.scene;
+            Scene::new()
+                .max_inner_size([350.0, 1000.0])
+                .zoom_range(0.1..=10.0)
+                .show(ui, &mut rect, |ui| {
+                    ui.add(
+                        ForceGraphWidget::new(&mut self.e.force_graph_state, &mut self.e.force_graph_config)
+                            .with_node_color_provider(&|id: u32| {
+                                let node = self.e.sim.get_node(id.into()).expect("node");
+                                let membership_hash = node.inner().membership_hash();
+                                let timestamp = node.inner().timestamp();
+                                (
+                                    hashable_to_color(membership_hash),
+                                    hashable_to_color(timestamp),
+                                )
+                            })
+                    )
+                });
+            self.e.scene = rect;
+        });
+    }
+
+    fn draw_scene_stats(&self, ui: &mut Ui) {
+        ui.label(format!("Seconds since start: {:#?}", &ui.input(|i| i.time)));
+        ui.label(format!("Rect: {:#?}", &self.e.scene));
+        ui.label(format!("Event Time: {:#?}", &self.e.sim.history.time()));
+        ui.label(format!("Wall Time: {:#?}", &self.e.sim.history.wall_time()));
+    }
+}
+
+fn hashable_to_color<T: Hash>(hashable: T) -> Color32 {
+    let mut hasher = DefaultHasher::new();
+    hashable.hash(&mut hasher);
+    let hash = hasher.finish();
+    let red = hash as u8;
+    let green = (hash >> 8) as u8;
+    let blue = (hash >> 16) as u8;
+    Color32::from_rgb(red, green, blue)
 }

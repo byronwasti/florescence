@@ -13,3 +13,4 @@ mod serialization;
 pub use message::{BinaryPatch, PollinationMessage};
 pub use peer_info::{PeerInfo, PeerStatus};
 pub use pollination::{PollinationError, PollinationNode, PollinationResponse};
+pub use treeclocks::{EventTree, IdTree, ItcMap};

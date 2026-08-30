@@ -457,8 +457,8 @@ enum NodeStatus {
 // MembershipHash
 use simplehash::fnv1a_64;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy, Serialize, Deserialize)]
-struct MembershipHash(u64);
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy, Serialize, Deserialize, Hash)]
+pub struct MembershipHash(u64);
 
 impl MembershipHash {
     fn new<A>(itc_map: &ItcMap<NodeInfo<A>>) -> Self {
