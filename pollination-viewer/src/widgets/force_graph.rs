@@ -140,18 +140,13 @@ impl<'a> ForceGraphWidget<'a> {
 
             painter.add(Shape::circle_filled(pos_map[idx], 15., ring_color));
             painter.add(Shape::circle_filled(pos_map[idx], 13., node_color));
-            /*
-            ui.ctx().fonts_mut(|font_view| {
-                painter.add(Shape::text(
-                    font_view,
-                    pos_map[idx],
-                    Align2::LEFT_TOP,
-                    format!("{idx}"),
-                    FontId::proportional(1.0),
-                    self.config.node_color,
-                ));
-            })
-            */
+            painter.text(
+                pos_map[idx],
+                egui::Align2::CENTER_CENTER,
+                format!("{idx}"),
+                egui::FontId::proportional(20.0),
+                egui::Color32::WHITE,
+            );
         }
     }
 
