@@ -1,5 +1,5 @@
 #![allow(unused)]
-use crate::widgets::{ForceGraph, ForceGraphConfig, ForceGraphSettingsWidget, ForceGraphWidget};
+use crate::widgets::{ForceGraphSettingsWidget, ForceGraphState, ForceGraphWidget};
 use egui::{
     Color32, Frame, Painter, Pos2, Rect, Scene, ScrollArea, Sense, Shape, Stroke, Ui, Vec2, emath,
     pos2, vec2,
@@ -42,20 +42,18 @@ struct EphemeralState {
     sim: Sim<SimulatedPollinationCore>,
     step: bool,
     scene: Rect,
-    force_graph_state: ForceGraph,
-    force_graph_config: ForceGraphConfig,
+    force_graph_state: ForceGraphState,
 }
 
 impl EphemeralState {
     fn new(saved: &DurableState) -> Self {
         let sim = Sim::new(saved.sim_config.clone());
-        let force_graph_state = ForceGraph::from_graph(sim.graph());
+        let force_graph_state = ForceGraphState::new(sim.graph());
         Self {
             sim,
             step: false,
             scene: Rect::ZERO,
             force_graph_state,
-            force_graph_config: ForceGraphConfig::default(),
         }
     }
 }
@@ -117,34 +115,36 @@ impl PollinationViewer {
 
     fn draw_history(&self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::Window::new("History").show(ui, |ui| {
-            ScrollArea::vertical().stick_to_bottom(true).auto_shrink(true).show(ui, |ui| {
-                let history = self.e.sim.history();
-                ui.label(format!("Event time {}", history.time()));
-                ui.label(format!("Wall time {}", history.wall_time()));
-                for (time, record) in history.records().enumerate() {
-                    match record {
-                        HistoricalRecord::NodeEvent(record) => {
-                            ui.collapsing(
-                                format!(
-                                    "{time} NodeId={:?} event={:?}",
-                                    record.id,
-                                    record.event
-                                ),
-                                |ui| {
-                                    ui.label(format!("msg_in={:?}", record.msg_in));
-                                    ui.label(format!("msgs_out={:?}", record.msgs_out));
-                                },
-                            );
-                        }
-                        HistoricalRecord::NoEvent => {
-                            ui.label("No event took place.");
-                        }
-                        HistoricalRecord::Error(node_id, error) => {
-                            ui.label(format!("{node_id:?} had an error {error}"));
+            ScrollArea::vertical()
+                .stick_to_bottom(true)
+                .auto_shrink(true)
+                .show(ui, |ui| {
+                    let history = self.e.sim.history();
+                    ui.label(format!("Event time {}", history.time()));
+                    ui.label(format!("Wall time {}", history.wall_time()));
+                    for (time, record) in history.records().enumerate() {
+                        match record {
+                            HistoricalRecord::NodeEvent(record) => {
+                                ui.collapsing(
+                                    format!(
+                                        "{time} NodeId={:?} event={:?}",
+                                        record.id, record.event
+                                    ),
+                                    |ui| {
+                                        ui.label(format!("msg_in={:?}", record.msg_in));
+                                        ui.label(format!("msgs_out={:?}", record.msgs_out));
+                                    },
+                                );
+                            }
+                            HistoricalRecord::NoEvent => {
+                                ui.label("No event took place.");
+                            }
+                            HistoricalRecord::Error(node_id, error) => {
+                                ui.label(format!("{node_id:?} had an error {error}"));
+                            }
                         }
                     }
-                }
-            })
+                })
         });
     }
 
@@ -175,7 +175,7 @@ impl PollinationViewer {
                 .zoom_range(0.1..=10.0)
                 .show(ui, &mut rect, |ui| {
                     ui.add(
-                        ForceGraphWidget::new(&mut self.e.force_graph_state, &mut self.e.force_graph_config)
+                        ForceGraphWidget::new(&mut self.e.force_graph_state)
                             .with_node_color_provider(&|id: u32| {
                                 let node = self.e.sim.get_node(id.into()).expect("node");
                                 let membership_hash = node.inner().membership_hash();
@@ -185,6 +185,35 @@ impl PollinationViewer {
                                     hashable_to_color(membership_hash),
                                 )
                             })
+                            .with_node_info_provider(&|id, ui| {
+                                let Some(node) = self.e.sim.get_node(id) else {
+                                    return;
+                                };
+
+                                ui.label(format!("Node Index: {}", node.id.index()));
+                                ui.label(format!(
+                                    "Membership Hash: {:?}",
+                                    node.inner().membership_hash()
+                                ));
+
+                                ui.collapsing("State", |ui| {
+                                    ui.label(format!("{:?}", node.inner().inner()))
+                                });
+
+                                ui.collapsing("Mailbox", |ui| {
+                                    egui::ScrollArea::vertical()
+                                        .auto_shrink(true)
+                                        .show(ui, |ui| {
+                                            for mail in node.mailbox.iter() {
+                                                ui.label(format!(
+                                                    "{} -> {:?}",
+                                                    mail.from.index(),
+                                                    mail.msg
+                                                ));
+                                            }
+                                        });
+                                });
+                            }),
                     )
                 });
             self.e.scene = rect;

@@ -30,6 +30,10 @@ impl<Message> Mailbox<Message> {
             mail,
         })
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Mail<Message>> {
+        self.inner.iter()
+    }
 }
 
 #[derive(Debug)]

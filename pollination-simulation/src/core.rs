@@ -20,6 +20,10 @@ impl SimulatedPollinationCore {
     pub fn timestamp(&self) -> &EventTree {
         self.inner.timestamp()
     }
+
+    pub fn inner(&self) -> &PollinationCore<NodeIndex> {
+        &self.inner
+    }
 }
 
 impl Simulee for SimulatedPollinationCore {

@@ -1,6 +1,6 @@
-use egui::{
-    Align2, Color32, FontId, Painter, Pos2, Rect, Response, Sense, Shape, Ui, Widget, vec2,
-};
+use egui::{Color32, Painter, Pos2, Rect, Response, Sense, Shape, Ui, Widget, vec2};
+use petgraph::{graph::NodeIndex, stable_graph::StableGraph as Graph};
+use std::collections::HashSet;
 
 mod config;
 mod graph;
@@ -8,11 +8,27 @@ mod graph;
 pub use config::ForceGraphConfig;
 pub use graph::ForceGraph;
 
+pub struct ForceGraphState {
+    graph: ForceGraph,
+    config: ForceGraphConfig,
+    open_node_windows: HashSet<NodeIndex>,
+}
+
+impl ForceGraphState {
+    pub fn new<T>(graph: &Graph<T, ()>) -> Self {
+        Self {
+            graph: ForceGraph::from_graph(graph),
+            config: ForceGraphConfig::default(),
+            open_node_windows: HashSet::new(),
+        }
+    }
+}
+
 pub struct ForceGraphWidget<'a> {
-    graph: &'a mut ForceGraph,
-    config: &'a mut ForceGraphConfig,
+    state: &'a mut ForceGraphState,
     node_color_provider: Option<&'a dyn Fn(u32) -> (Color32, Color32)>,
     edge_color_provider: Option<&'a dyn Fn(u32, u32) -> Color32>,
+    info_provider: Option<&'a dyn Fn(NodeIndex, &mut egui::Ui)>,
 }
 
 impl Widget for ForceGraphWidget<'_> {
@@ -22,29 +38,29 @@ impl Widget for ForceGraphWidget<'_> {
 
         // TODO: Move simulation to a "logic" step
         let (pos_map, fixed) = self.position_map(ui, &response);
-        self.graph.run_force_simulation(self.config, &fixed);
+        self.state
+            .graph
+            .run_force_simulation(&self.state.config, &fixed);
 
         self.draw_graph(ui, &painter, &response, &pos_map);
+        self.draw_open_node_windows(ui);
         response
     }
 }
 
 impl<'a> ForceGraphWidget<'a> {
-    pub fn new(
-        graph: &'a mut ForceGraph,
-        config: &'a mut ForceGraphConfig,
-    ) -> ForceGraphWidget<'a> {
+    pub fn new(state: &'a mut ForceGraphState) -> ForceGraphWidget<'a> {
         Self {
-            graph,
-            config,
+            state,
             node_color_provider: None,
             edge_color_provider: None,
+            info_provider: None,
         }
     }
 
     pub fn with_node_color_provider(
         mut self,
-        node_colors: &'a (dyn Fn(u32) -> (Color32, Color32)),
+        node_colors: &'a dyn Fn(u32) -> (Color32, Color32),
     ) -> Self {
         self.node_color_provider = Some(node_colors);
         self
@@ -52,9 +68,17 @@ impl<'a> ForceGraphWidget<'a> {
 
     pub fn with_edge_color_provider(
         mut self,
-        edge_colors: &'a (dyn Fn(u32, u32) -> Color32),
+        edge_colors: &'a dyn Fn(u32, u32) -> Color32,
     ) -> Self {
         self.edge_color_provider = Some(edge_colors);
+        self
+    }
+
+    pub fn with_node_info_provider(
+        mut self,
+        info_provider: &'a dyn Fn(NodeIndex, &mut egui::Ui),
+    ) -> Self {
+        self.info_provider = Some(info_provider);
         self
     }
 
@@ -63,7 +87,7 @@ impl<'a> ForceGraphWidget<'a> {
         let mut fixed = vec![];
 
         let mut interact = false;
-        for (idx, node) in self.graph.inner_mut().node_weights_mut().enumerate() {
+        for (idx, node) in self.state.graph.inner_mut().node_weights_mut().enumerate() {
             let point_rect = Rect::from_center_size(node.pos, vec2(20., 20.));
             let point_id = response.id.with(idx);
             let point_response = ui.interact(point_rect, point_id, Sense::drag());
@@ -71,6 +95,7 @@ impl<'a> ForceGraphWidget<'a> {
 
             let pos = if point_response.dragged() {
                 fixed.push(idx);
+                self.state.open_node_windows.insert(NodeIndex::new(idx));
                 interact = true;
                 node.pos
             } else {
@@ -84,20 +109,20 @@ impl<'a> ForceGraphWidget<'a> {
             out.push(pos)
         }
 
-        self.graph.state.interact = interact;
+        self.state.graph.state.interact = interact;
 
         (out, fixed)
     }
 
-    fn draw_graph(&self, ui: &mut Ui, painter: &Painter, _response: &Response, pos_map: &[Pos2]) {
-        for node in self.graph.inner().node_weights() {
-            for neighbor in self.graph.inner().neighbors((node.id as u32).into()) {
-                let neighbor = self.graph.inner().node_weight(neighbor).unwrap();
+    fn draw_graph(&self, _ui: &mut Ui, painter: &Painter, _response: &Response, pos_map: &[Pos2]) {
+        for node in self.state.graph.inner().node_weights() {
+            for neighbor in self.state.graph.inner().neighbors((node.id as u32).into()) {
+                let neighbor = self.state.graph.inner().node_weight(neighbor).unwrap();
 
                 let color = if let Some(edge_color_fn) = &self.edge_color_provider {
                     edge_color_fn(node.id as u32, neighbor.id as u32)
                 } else {
-                    self.config.edge_color
+                    self.state.config.edge_color
                 };
                 painter.add(Shape::line_segment(
                     [pos_map[node.id], pos_map[neighbor.id]],
@@ -106,11 +131,11 @@ impl<'a> ForceGraphWidget<'a> {
             }
         }
 
-        for (idx, _node) in self.graph.inner().node_weights().enumerate() {
+        for (idx, _node) in self.state.graph.inner().node_weights().enumerate() {
             let (ring_color, node_color) = if let Some(color_fn) = &self.node_color_provider {
                 color_fn(idx as u32)
             } else {
-                (self.config.ring_color, self.config.node_color)
+                (self.state.config.ring_color, self.state.config.node_color)
             };
 
             painter.add(Shape::circle_filled(pos_map[idx], 15., ring_color));
@@ -127,6 +152,27 @@ impl<'a> ForceGraphWidget<'a> {
                 ));
             })
             */
+        }
+    }
+
+    fn draw_open_node_windows(&mut self, ui: &egui::Ui) {
+        let Some(info_provider) = self.info_provider else {
+            return;
+        };
+
+        let mut remove_id = None;
+        for node_idx in self.state.open_node_windows.iter() {
+            egui::Window::new(format!("Node {}", node_idx.index())).show(ui, |ui| {
+                if ui.button("Close").clicked() {
+                    remove_id = Some(*node_idx)
+                }
+
+                info_provider(*node_idx, ui);
+            });
+        }
+
+        if let Some(remove_id) = remove_id {
+            self.state.open_node_windows.remove(&remove_id);
         }
     }
 }

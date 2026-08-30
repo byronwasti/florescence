@@ -1,6 +1,10 @@
 use egui::{Pos2, pos2};
 use fjadra::{Center, Link, ManyBody, Node as FNode, SimulationBuilder};
-use petgraph::{dot::Dot, stable_graph::StableGraph as Graph, visit::{EdgeRef, IntoEdgeReferences}};
+use petgraph::{
+    dot::Dot,
+    stable_graph::StableGraph as Graph,
+    visit::{EdgeRef, IntoEdgeReferences},
+};
 use rand::Rng;
 
 #[derive(Debug, Default)]

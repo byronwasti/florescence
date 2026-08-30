@@ -7,7 +7,7 @@ use thiserror::Error;
 #[derive(Debug)]
 pub struct SimNode<S: Simulee> {
     pub id: NodeIndex,
-    mailbox: Mailbox<S::Message>,
+    pub mailbox: Mailbox<S::Message>,
     simulee: Option<S>,
 }
 
