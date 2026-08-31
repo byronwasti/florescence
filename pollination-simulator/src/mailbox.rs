@@ -4,18 +4,23 @@ use std::{cmp::Ordering, collections::BinaryHeap};
 
 #[derive(Debug, Default)]
 pub struct Mailbox<Message> {
+    counter: u64,
     inner: BinaryHeap<Mail<Message>>,
 }
 
 impl<Message> Mailbox<Message> {
     pub fn new() -> Mailbox<Message> {
         Self {
+            counter: 0,
             inner: BinaryHeap::new(),
         }
     }
 
     pub fn push<R: Rng + ?Sized>(&mut self, rng: &mut R, from: NodeIndex, msg: Message) {
-        self.inner.push(Mail::new(rng, from, msg));
+        // TODO: Go back to random
+        //self.inner.push(Mail::new(rng, from, msg));
+        self.inner.push(Mail::new_fixed(from, msg, self.counter));
+        self.counter += 1;
     }
 
     pub fn push_mail(&mut self, mail: Mail<Message>) {
@@ -60,7 +65,7 @@ impl<Message: Clone> Delivery<Message> {
 
 #[derive(Debug, Clone)]
 pub struct Mail<Message> {
-    pub sort: u64,
+    pub sort: std::cmp::Reverse<u64>,
     pub from: NodeIndex,
     pub msg: Message,
 }
@@ -68,7 +73,15 @@ pub struct Mail<Message> {
 impl<M> Mail<M> {
     pub fn new<R: Rng + ?Sized>(rng: &mut R, from: NodeIndex, msg: M) -> Mail<M> {
         Self {
-            sort: rng.random(),
+            sort: std::cmp::Reverse(rng.random()),
+            from,
+            msg,
+        }
+    }
+
+    pub fn new_fixed(from: NodeIndex, msg: M, sort: u64) -> Mail<M> {
+        Self {
+            sort: std::cmp::Reverse(sort),
             from,
             msg,
         }

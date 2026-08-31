@@ -167,7 +167,7 @@ impl PollinationViewer {
             return;
         };
 
-        ui.label(format!("{:?} => {} ({})", &msg.from, &msg.msg, msg.sort));
+        ui.label(format!("{:?} => {} ({:?})", &msg.from, &msg.msg, msg.sort));
     }
 
     fn draw_msg_out(&self, ui: &mut egui::Ui, (to, msg): &(NodeIndex, PollinationMessage<NodeIndex>)) {
@@ -178,7 +178,7 @@ impl PollinationViewer {
         egui::Window::new("Sim Controls").show(ui, |ui| {
             ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
                 ui.add(
-                    egui::Slider::new(&mut self.d.sim_config.node_count, 0..=25).text("Node count"),
+                    egui::Slider::new(&mut self.d.sim_config.node_count, 0..=1000).text("Node count"),
                 );
                 if ui.button("Reset").clicked() {
                     self.e = EphemeralState::new(&self.d);
