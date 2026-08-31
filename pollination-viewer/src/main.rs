@@ -4,7 +4,13 @@
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
-    env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
+    let subscriber = tracing_subscriber::FmtSubscriber::builder()
+        .init();
+
+    tracing::info!("Test???");
+    tracing::error!("Test???");
+
+    //env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -35,6 +41,7 @@ fn main() {
     let web_options = eframe::WebOptions::default();
 
     wasm_bindgen_futures::spawn_local(async {
+        tracing::info!("B Test???");
         let document = web_sys::window()
             .expect("No window")
             .document()

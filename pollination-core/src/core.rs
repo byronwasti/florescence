@@ -5,6 +5,7 @@ use std::{
     mem,
 };
 use thiserror::Error;
+use tracing::{error, info};
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 use uuid::Uuid;
 
@@ -17,7 +18,7 @@ pub struct PollinationCore<A> {
 
 impl<A> PollinationCore<A>
 where
-    A: Clone + for<'a> Deserialize<'a> + Serialize,
+    A: Clone + for<'a> Deserialize<'a> + Serialize + std::fmt::Debug,
 {
     pub fn new(uuid: Uuid, addr: A) -> Self {
         let own_info = NodeInfo::new(uuid, addr);
@@ -76,6 +77,7 @@ where
         assert_eq!(removals.len(), 1);
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn heartbeat_message(&self) -> PollinationMessage<A> {
         let membership_hash = MembershipHash::new(&self.core_map);
         let unique_count = self.unique_count();
@@ -97,12 +99,14 @@ where
     }
 
     // NOTE: Degrades to be heartbeat_message() if the timestamps are equal
+    #[tracing::instrument(skip(self))]
     fn update_message(&self, timestamp: &EventTree) -> PollinationMessage<A> {
         let mut msg = self.heartbeat_message();
         msg.patch = self.core_map.diff(timestamp);
         msg
     }
 
+    #[tracing::instrument(skip(self))]
     fn new_member_message(&self) -> PollinationMessage<A> {
         // Include all of our peers to be included as well
         let mut msg = self.update_message(&EventTree::new());
@@ -110,12 +114,14 @@ where
         msg
     }
 
+    #[tracing::instrument(skip(self))]
     fn provide_member_message(&self) -> PollinationMessage<A> {
         let mut msg = self.update_message(&EventTree::new());
         msg.new_membership = NewMembership::Provide;
         msg
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn recycle(&mut self) -> bool {
         let dead_peers: Option<IdTree> = self
             .core_map
@@ -142,6 +148,7 @@ where
         }
     }
 
+    #[tracing::instrument(skip(self))]
     fn handle_skew(&self, message: PollinationMessage<A>) -> PollinationMessage<A> {
         match message.unique_count.cmp(&self.unique_count()) {
             Ordering::Greater => self.new_member_message(),
@@ -156,6 +163,7 @@ where
         }
     }
 
+    #[tracing::instrument(skip(self))]
     fn handle_new_members(
         &mut self,
         message: PollinationMessage<A>,
@@ -195,6 +203,7 @@ where
         }
     }
 
+    #[tracing::instrument(skip(self))]
     fn handle_provided_membership(
         &mut self,
         message: PollinationMessage<A>,
@@ -244,6 +253,7 @@ where
         }
     }
 
+    #[tracing::instrument]
     pub fn handle_message(
         &mut self,
         message: PollinationMessage<A>,
@@ -305,6 +315,7 @@ where
 
     // Evenly divide the Self address space and distribute to peers. Then, assign every nodes
     // information to the map.
+    #[tracing::instrument(skip(self))]
     fn add_peers(&mut self, mut peers: Vec<NodeInfo<A>>) {
         let mut new_ids = self.id.clone().fork_many(peers.len() + 1);
         self.id = new_ids[0].clone();

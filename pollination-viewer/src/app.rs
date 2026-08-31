@@ -151,7 +151,9 @@ impl PollinationViewer {
     fn draw_controls(&mut self, ui: &egui::Ui, _frame: &mut eframe::Frame) {
         egui::Window::new("Sim Controls").show(ui, |ui| {
             ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
-                ui.add(egui::Slider::new(&mut self.d.sim_config.node_count, 0..=25).text("Node count"));
+                ui.add(
+                    egui::Slider::new(&mut self.d.sim_config.node_count, 0..=25).text("Node count"),
+                );
                 if ui.button("Reset").clicked() {
                     self.e = EphemeralState::new(&self.d);
                 }
