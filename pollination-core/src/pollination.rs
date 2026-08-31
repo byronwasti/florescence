@@ -8,6 +8,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt};
 use thiserror::Error;
+use tracing::{debug, error, warn};
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 use uuid::Uuid;
 

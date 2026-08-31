@@ -1,3 +1,4 @@
+use tracing::error;
 use treeclocks::IdTree;
 
 pub fn recycle_ids(own: IdTree, dead_peers: IdTree) -> IdTree {

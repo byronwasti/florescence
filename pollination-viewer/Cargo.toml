@@ -25,7 +25,7 @@ pollination-simulation = { path = "../pollination-simulation" }
 pollination-simulator = { path = "../pollination-simulator" }
 uuid = "1.18.1"
 anyhow = "1.0.100"
-tracing-subscriber = "0.3.23"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tracing = "0.1.44"
 
 # native:

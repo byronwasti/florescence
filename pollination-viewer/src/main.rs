@@ -5,12 +5,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
+        //.with_max_level(tracing::Level::DEBUG)
+        //.with_env_filter("info,pollination_viewer=debug,pollination_core=debug")
         .init();
-
-    tracing::info!("Test???");
-    tracing::error!("Test???");
-
-    //env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

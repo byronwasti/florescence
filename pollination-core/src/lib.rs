@@ -1,6 +1,3 @@
-#[macro_use]
-extern crate tracing;
-
 pub mod core;
 mod message;
 mod peer_info;

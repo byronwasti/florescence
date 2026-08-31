@@ -77,7 +77,7 @@ where
         assert_eq!(removals.len(), 1);
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(level = "info", skip(self))]
     pub fn heartbeat_message(&self) -> PollinationMessage<A> {
         let membership_hash = MembershipHash::new(&self.core_map);
         let unique_count = self.unique_count();
@@ -123,6 +123,7 @@ where
 
     #[tracing::instrument(skip(self))]
     pub fn recycle(&mut self) -> bool {
+        info!("Recycling?");
         let dead_peers: Option<IdTree> = self
             .core_map
             .iter()
@@ -150,13 +151,22 @@ where
 
     #[tracing::instrument(skip(self))]
     fn handle_skew(&self, message: PollinationMessage<A>) -> PollinationMessage<A> {
+        // TODO: Swap compares to be self.compare(other)
         match message.unique_count.cmp(&self.unique_count()) {
-            Ordering::Greater => self.new_member_message(),
-            Ordering::Less => self.heartbeat_message(),
+            Ordering::Greater => {
+                info!("Peer has greater unique_count; request membership");
+                self.new_member_message()
+            }
+            Ordering::Less => {
+                info!("Peer has lower unique_count; send update");
+                self.update_message(&message.timestamp)
+            }
             Ordering::Equal => {
                 if message.membership_hash > self.membership_hash() {
+                    info!("Membership hash of peer is greater; request membership");
                     self.new_member_message()
                 } else {
+                    info!("Membership hash of peer is lower; heartbeat");
                     self.heartbeat_message()
                 }
             }
@@ -169,6 +179,7 @@ where
         message: PollinationMessage<A>,
     ) -> Result<Option<PollinationMessage<A>>> {
         if self.membership_hash() == message.membership_hash {
+            info!("Membership_hash mismatch; bailing");
             return Ok(None);
         }
 
@@ -182,6 +193,7 @@ where
         if a < b {
             // NOTE: I think this can actually end up in a live-lock situation, but probably
             // too rare to be a problem.
+            info!("New group has more unique; bailing");
             return Ok(None);
         }
 
@@ -196,19 +208,25 @@ where
         }
 
         if peers.is_empty() {
+            info!("No peers to add");
             Ok(None)
         } else {
+            info!("Peers to add; sending provide member message");
             self.add_peers(peers);
             Ok(Some(self.provide_member_message()))
         }
     }
 
+    /// Handling a new core_map which has ourselves included.
+    /// Take on a peers core_map; merge them
+    // TODO: This name is horrible.
     #[tracing::instrument(skip(self))]
     fn handle_provided_membership(
         &mut self,
         message: PollinationMessage<A>,
     ) -> Result<Option<PollinationMessage<A>>> {
         if self.membership_hash() == message.membership_hash {
+            info!("Membership hash equality; bailing");
             return Ok(None);
         }
 
@@ -217,6 +235,7 @@ where
 
         let (a, b) = unique_diff_count(&self.core_map, &peer_map);
         if a > b {
+            info!("More unique us; bailing");
             return Ok(None);
         }
 
@@ -247,21 +266,25 @@ where
 
             self.increment();
 
+            info!("Merged with peers; sending update");
             return Ok(Some(self.update_message(&message.timestamp)));
         } else {
+            info!("No self in new map; bailing");
             return Err(PollinationError::NoSelf);
         }
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip_all)]
     pub fn handle_message(
         &mut self,
         message: PollinationMessage<A>,
     ) -> Option<PollinationMessage<A>> {
+        info!("SELF_DUMP={}", self);
+
         if message.new_membership.is_request() {
             match self.handle_new_members(message.clone()) {
                 Ok(Some(msg)) => return Some(msg),
-                Ok(None) => debug!("Nothing to do for handling requested new membership"),
+                Ok(None) => info!("Nothing to do for handling requested new membership"),
                 Err(err) => {
                     error!("{err}");
                     // TODO: Remove panic
@@ -273,7 +296,7 @@ where
         if message.new_membership.is_provide() {
             match self.handle_provided_membership(message.clone()) {
                 Ok(Some(msg)) => return Some(msg),
-                Ok(None) => debug!("Nothing to do for handling provided membership"),
+                Ok(None) => info!("Nothing to do for handling provided membership"),
                 Err(err) => {
                     error!("{err}");
                     // TODO: Remove panic
@@ -282,32 +305,43 @@ where
             }
         }
 
+        info!("Handling basic...");
         if let Some(patch) = message.patch.clone() {
+            info!("Patch present in message.");
             let mut updated_core = self.core_map.clone();
             let (added, removed) = updated_core.apply(patch); // TODO: Use these
 
             if find_id(&updated_core, self.uuid()).is_some() {
                 if MembershipHash::new(&updated_core) != message.membership_hash {
+                    info!("Membership has mismatch");
                     // Definitely unclean update; memberhsip hash mismatch
                     Some(self.handle_skew(message))
                 } else {
+                    info!("Clean update; heartbeat");
                     // Assume clean
                     // TODO: Are there edge cases?
                     self.core_map = updated_core;
-                    Some(self.update_message(&message.timestamp))
+                    //Some(self.update_message(&message.timestamp))
+                    Some(self.heartbeat_message())
                 }
             } else {
+                info!("Removed self; unclean update");
                 // Definitely unclean update; removed self
                 Some(self.handle_skew(message))
             }
         } else {
+            info!("No patch");
             if &message.timestamp == self.timestamp() {
                 if self.membership_hash() == message.membership_hash {
+                    info!("All matches; do nothing");
                     None
                 } else {
+                    info!("Handling skew.");
                     Some(self.handle_skew(message))
                 }
             } else {
+                // TODO: Inefficient; we should be comparing timestamps
+                info!("Sending update");
                 Some(self.update_message(&message.timestamp))
             }
         }
@@ -329,6 +363,33 @@ where
             // already.
             assert!(removals.is_empty());
         }
+    }
+}
+
+impl<A: std::fmt::Debug> std::fmt::Display for PollinationCore<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        let map = self
+            .core_map
+            .iter()
+            .map(|(id, info)| {
+                format!(
+                    "{} => {{ {:?}::{} timestamp={} status={:?} }}",
+                    id, info.addr, info.uuid, info.timestamp, info.status
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let map = map.join(", ");
+
+        write!(
+            f,
+            "{:?}::{} timestamp={}, id={}, map={}",
+            self.own_info.addr,
+            self.own_info.uuid,
+            self.core_map.timestamp(),
+            &self.id,
+            map,
+        )
     }
 }
 
