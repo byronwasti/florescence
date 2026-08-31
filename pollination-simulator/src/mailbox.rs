@@ -60,7 +60,7 @@ impl<Message: Clone> Delivery<Message> {
 
 #[derive(Debug, Clone)]
 pub struct Mail<Message> {
-    sort: u64,
+    pub sort: u64,
     pub from: NodeIndex,
     pub msg: Message,
 }

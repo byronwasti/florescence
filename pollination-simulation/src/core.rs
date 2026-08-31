@@ -1,4 +1,4 @@
-use pollination::{EventTree, core::*};
+pub use pollination::{EventTree, core::*};
 use pollination_simulator::{Config, Delivery, NodeIndex, Simulee};
 use rand::{
     distr::{Distribution, weighted::WeightedIndex},

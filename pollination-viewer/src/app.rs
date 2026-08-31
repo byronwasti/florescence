@@ -4,8 +4,8 @@ use egui::{
     Color32, Frame, Painter, Pos2, Rect, Scene, ScrollArea, Sense, Shape, Stroke, Ui, Vec2, emath,
     pos2, vec2,
 };
-use pollination_simulation::core::{PollinationConfig, SimulatedPollinationCore};
-use pollination_simulator::{Config, Sim, history::HistoricalRecord};
+use pollination_simulation::core::{PollinationConfig, SimulatedPollinationCore, PollinationMessage, PollinationEvent};
+use pollination_simulator::{Config, Sim, history::HistoricalRecord, Mail, NodeIndex};
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
@@ -125,14 +125,27 @@ impl PollinationViewer {
                     for (time, record) in history.records().enumerate() {
                         match record {
                             HistoricalRecord::NodeEvent(record) => {
+                                let from_node = if matches!(record.event, PollinationEvent::HandleMessage) {
+                                    let msg = record.msg_in.as_ref().expect("Some message");
+                                    format!("from={:?}", msg.from)
+                                } else {
+                                    "".to_string()
+                                };
                                 ui.collapsing(
                                     format!(
-                                        "{time} NodeId={:?} event={:?}",
-                                        record.id, record.event
+                                        "{time} NodeId={:?} event={:?} {}",
+                                        record.id, record.event, from_node,
                                     ),
                                     |ui| {
-                                        ui.label(format!("msg_in={:?}", record.msg_in));
-                                        ui.label(format!("msgs_out={:?}", record.msgs_out));
+                                        ui.collapsing("Msg In", |ui| {
+                                            self.draw_msg_in(ui, record.msg_in.as_ref());
+                                        });
+                                        ui.collapsing("Msgs Out", |ui| {
+                                            for msg in record.msgs_out.iter() {
+                                                self.draw_msg_out(ui, msg);
+                                            }
+                                            //ui.label(format!("msgs_out={:?}", record.msgs_out));
+                                        });
                                     },
                                 );
                             }
@@ -146,6 +159,19 @@ impl PollinationViewer {
                     }
                 })
         });
+    }
+
+    fn draw_msg_in(&self, ui: &mut egui::Ui, msg: Option<&Mail<PollinationMessage<NodeIndex>>>) {
+        let Some(msg) = msg else {
+            ui.label("None");
+            return;
+        };
+
+        ui.label(format!("{:?} => {} ({})", &msg.from, &msg.msg, msg.sort));
+    }
+
+    fn draw_msg_out(&self, ui: &mut egui::Ui, (to, msg): &(NodeIndex, PollinationMessage<NodeIndex>)) {
+        ui.label(format!("{:?} => {}", to, &msg));
     }
 
     fn draw_controls(&mut self, ui: &egui::Ui, _frame: &mut eframe::Frame) {

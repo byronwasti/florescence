@@ -33,6 +33,10 @@ where
         }
     }
 
+    pub fn addr(&self) -> &A {
+        &self.own_info.addr
+    }
+
     pub fn timestamp(&self) -> &EventTree {
         self.core_map.timestamp()
     }
@@ -159,7 +163,7 @@ where
             }
             Ordering::Less => {
                 info!("Peer has lower unique_count; send update");
-                self.update_message(&message.timestamp)
+                self.update_message(&EventTree::new())
             }
             Ordering::Equal => {
                 if message.membership_hash > self.membership_hash() {
@@ -274,12 +278,16 @@ where
         }
     }
 
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(skip_all,fields(id=?self.addr()))]
     pub fn handle_message(
         &mut self,
         message: PollinationMessage<A>,
     ) -> Option<PollinationMessage<A>> {
         info!("SELF_DUMP={}", self);
+        assert_eq!(
+            &find_id(&self.core_map, self.uuid()).expect("Self to exist"),
+            &self.id
+        );
 
         if message.new_membership.is_request() {
             match self.handle_new_members(message.clone()) {
@@ -321,6 +329,7 @@ where
                     // Assume clean
                     // TODO: Are there edge cases?
                     self.core_map = updated_core;
+                    self.id = find_id(&self.core_map(), self.uuid()).expect("Self to be present");
                     //Some(self.update_message(&message.timestamp))
                     Some(self.heartbeat_message())
                 }
@@ -359,6 +368,7 @@ where
 
         for (new_id, info) in new_ids.drain(1..).zip(peers.drain(..)) {
             let removals = self.insert(new_id, info);
+            info!("Removing {} ids: {:?}", removals.len(), &removals);
             // There should be no removals, as inserting our own info should have removed ourselves
             // already.
             assert!(removals.is_empty());
@@ -372,10 +382,13 @@ impl<A: std::fmt::Debug> std::fmt::Display for PollinationCore<A> {
             .core_map
             .iter()
             .map(|(id, info)| {
+                /*
                 format!(
                     "{} => {{ {:?}::{} timestamp={} status={:?} }}",
                     id, info.addr, info.uuid, info.timestamp, info.status
                 )
+                */
+                format!("{id} => {info}")
             })
             .collect::<Vec<_>>();
 
@@ -476,14 +489,18 @@ impl<A: std::fmt::Debug> std::fmt::Display for PollinationMessage<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         write!(
             f,
-            "PollinationMessage {{ uuid: {0}, id: {1}, timestamp: {2}, membership_hash: {3}, unique_count: {4}, patch: {5:?}, new_membership: {6:?} }}",
+            "PollinationMessage {{ uuid={0} id={1} timestamp={2} membership_hash={3} unique_count={4} new_membership={5:?} patch={6} }}",
             self.uuid,
             self.id,
             self.timestamp,
             self.membership_hash.0,
             self.unique_count,
-            self.patch,
             self.new_membership,
+            if let Some(patch) = &self.patch {
+                format!("{patch}")
+            } else {
+                "None".to_string()
+            },
         )
     }
 }
@@ -540,6 +557,16 @@ impl<A> NodeInfo<A> {
             timestamp: 1,
             status: NodeStatus::Healthy,
         }
+    }
+}
+
+impl<A: std::fmt::Debug> std::fmt::Display for NodeInfo<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "{{ {:?}::{} timestamp={} status={:?} }}",
+            self.addr, self.uuid, self.timestamp, self.status
+        )
     }
 }
 
