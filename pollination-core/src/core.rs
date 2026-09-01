@@ -102,9 +102,15 @@ where
         }
     }
 
+    fn full_update_message(&self) -> PollinationMessage<A> {
+        info!("Full update");
+        self.update_message(&EventTree::new())
+    }
+
     // NOTE: Degrades to be heartbeat_message() if the timestamps are equal
     #[tracing::instrument(skip(self))]
     fn update_message(&self, timestamp: &EventTree) -> PollinationMessage<A> {
+        info!("Update");
         let mut msg = self.heartbeat_message();
         msg.patch = self.core_map.diff(timestamp);
         msg
@@ -112,16 +118,18 @@ where
 
     #[tracing::instrument(skip(self))]
     fn request_membership_message(&self) -> PollinationMessage<A> {
+        info!("Request membership");
         // Include all of our peers to be included as well
-        let mut msg = self.update_message(&EventTree::new());
+        let mut msg = self.full_update_message();
         msg.new_membership = NewMembership::Request;
         msg
     }
 
     #[tracing::instrument(skip(self))]
-    fn provide_member_message(&self) -> PollinationMessage<A> {
-        let mut msg = self.update_message(&EventTree::new());
-        msg.new_membership = NewMembership::Provide;
+    fn response_membership_message(&self) -> PollinationMessage<A> {
+        info!("Response membership");
+        let mut msg = self.full_update_message();
+        msg.new_membership = NewMembership::Response;
         msg
     }
 
@@ -155,7 +163,15 @@ where
 
     #[tracing::instrument(skip(self))]
     fn handle_skew(&self, message: PollinationMessage<A>) -> PollinationMessage<A> {
-        // TODO: Swap compares to be self.compare(other)
+        if message.patch.is_some() {
+            self.handle_skew_patch(message)
+        } else {
+            self.handle_skew_no_patch(message)
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn handle_skew_patch(&self, message: PollinationMessage<A>) -> PollinationMessage<A> {
         // TODO: Safe expect but not great
         let peer_map: ItcMap<NodeInfo<A>> =
             ItcMap::from_patch(message.patch.expect("Patch"));
@@ -164,27 +180,47 @@ where
         //match message.unique_count.cmp(&self.unique_count()) {
         match a.cmp(&b) {
             Ordering::Greater => {
-                info!("Peer has lower unique_count; send update");
-                self.update_message(&EventTree::new())
+                info!("Self > Peer");
+                self.full_update_message()
             }
             Ordering::Less => {
-                info!("Peer has greater unique_count; request membership");
+                info!("Self < Peer");
                 self.request_membership_message()
             }
             Ordering::Equal => {
+                info!("Self = Peer");
                 if message.membership_hash > self.membership_hash() {
-                    info!("Membership hash of peer is greater; request membership");
+                    info!("M(Self) > M(Peer)");
                     self.request_membership_message()
                 } else {
-                    info!("Membership hash of peer is lower; heartbeat");
-                    self.heartbeat_message()
+                    info!("M(Self) < M(Peer)");
+                    self.full_update_message()
                 }
             }
         }
     }
 
+    #[tracing::instrument(skip_all)]
+    fn handle_skew_no_patch(&self, message: PollinationMessage<A>) -> PollinationMessage<A> {
+        match self.unique_count().cmp(&message.unique_count) {
+            Ordering::Greater => {
+                info!("Self > Peer");
+                self.full_update_message()
+            }
+            Ordering::Less => {
+                info!("Self < Peer");
+                self.request_membership_message()
+            }
+            Ordering::Equal => {
+                info!("Self = Peer");
+                // No need to check anything here, we just need to share more info
+                self.full_update_message()
+            }
+        }
+    }
+
     #[tracing::instrument(skip(self))]
-    fn handle_new_members(
+    fn handle_membership_request(
         &mut self,
         message: PollinationMessage<A>,
     ) -> Result<Option<PollinationMessage<A>>> {
@@ -223,7 +259,7 @@ where
         } else {
             info!("Peers to add; sending provide member message");
             self.add_peers(peers);
-            Ok(Some(self.provide_member_message()))
+            Ok(Some(self.response_membership_message()))
         }
     }
 
@@ -296,7 +332,7 @@ where
         );
 
         if message.new_membership.is_request() {
-            match self.handle_new_members(message.clone()) {
+            match self.handle_membership_request(message.clone()) {
                 Ok(Some(msg)) => return Some(msg),
                 Ok(None) => info!("Nothing to do for handling requested new membership"),
                 Err(err) => {
@@ -307,7 +343,7 @@ where
             }
         }
 
-        if message.new_membership.is_provide() {
+        if message.new_membership.is_response() {
             match self.handle_new_membership(message.clone()) {
                 Ok(Some(msg)) => return Some(msg),
                 Ok(None) => info!("Nothing to do for handling provided membership"),
@@ -457,21 +493,13 @@ fn unique_diff_count<A>(map_a: &ItcMap<NodeInfo<A>>, map_b: &ItcMap<NodeInfo<A>>
     let diff_a = entries_a
         .iter()
         .filter(|(d0, t0)| {
-            if let Some(t1) = entries_b.get(d0) {
-                *t0 > t1
-            } else {
-                true
-            }
+            !entries_b.contains_key(d0)
         })
         .count() as i64;
     let diff_b = entries_b
         .iter()
         .filter(|(d0, t0)| {
-            if let Some(t1) = entries_a.get(d0) {
-                *t0 > t1
-            } else {
-                true
-            }
+            !entries_a.contains_key(d0)
         })
         .count() as i64;
 
@@ -515,7 +543,7 @@ impl<A: std::fmt::Debug> std::fmt::Display for PollinationMessage<A> {
 enum NewMembership {
     None,
     Request,
-    Provide,
+    Response,
 }
 
 impl NewMembership {
@@ -527,8 +555,8 @@ impl NewMembership {
         matches!(self, NewMembership::Request)
     }
 
-    fn is_provide(&self) -> bool {
-        matches!(self, NewMembership::Provide)
+    fn is_response(&self) -> bool {
+        matches!(self, NewMembership::Response)
     }
 }
 
