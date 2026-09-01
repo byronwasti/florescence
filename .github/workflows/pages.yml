@@ -19,19 +19,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4 # repo checkout
-      - name: Setup toolchain for wasm
-        run: |
-          rustup toolchain install stable --target wasm32-unknown-unknown
-          rustup update stable
-          rustup default 1.95
-          rustup set profile minimal
-          rustup target add wasm32-unknown-unknown
-      - name: Clean Rust cache
-        run: rm -rf ~/.cargo/registry/cache ~/.cargo/git/db
-      - name: Rust Cache # cache the rust build artefacts
-        uses: Swatinem/rust-cache@v2
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+#     - name: Setup toolchain for wasm
+#       run: |
+#         rustup toolchain install stable --target wasm32-unknown-unknown
+#         rustup update stable
+#         rustup default stable
+#         rustup set profile minimal
+#         rustup target add wasm32-unknown-unknown
+#      - name: Clean Rust cache
+#        run: rm -rf ~/.cargo/registry/cache ~/.cargo/git/db
+#      - name: Rust Cache # cache the rust build artefacts
+#        uses: Swatinem/rust-cache@v2
       - name: Download and install Trunk binary
         run: wget -qO- https://github.com/thedodd/trunk/releases/latest/download/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xzf-
+      - name: Get version
+        run: |
+          rustc --version
+          ./trunk --version
       - name: Build # build
         # Environment $public_url resolves to the github project page.
         # If using a user/organization page, remove the `${{ github.event.repository.name }}` part.

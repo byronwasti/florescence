@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+getrandom = { version = "0.4.3", features = ["wasm_js"] }
 petgraph = { version = "0.8.3", features = ["serde-1"] }
 rand = "0.9.2"
 serde = { version = "1.0.219", features = ["derive"] }
