@@ -81,6 +81,11 @@ where
         assert_eq!(removals.len(), 1);
     }
 
+    // Insert value at IdTree location, returning removed IdTrees and their values.
+    fn insert(&mut self, id: IdTree, value: NodeInfo<A>) -> Vec<(IdTree, NodeInfo<A>)> {
+        self.core_map.insert(id, value)
+    }
+
     #[tracing::instrument(level = "info", skip(self))]
     pub fn heartbeat_message(&self) -> PollinationMessage<A> {
         let membership_hash = MembershipHash::new(&self.core_map);
@@ -97,11 +102,6 @@ where
         }
     }
 
-    // Insert value at IdTree location, returning removed IdTrees and their values.
-    fn insert(&mut self, id: IdTree, value: NodeInfo<A>) -> Vec<(IdTree, NodeInfo<A>)> {
-        self.core_map.insert(id, value)
-    }
-
     // NOTE: Degrades to be heartbeat_message() if the timestamps are equal
     #[tracing::instrument(skip(self))]
     fn update_message(&self, timestamp: &EventTree) -> PollinationMessage<A> {
@@ -111,7 +111,7 @@ where
     }
 
     #[tracing::instrument(skip(self))]
-    fn new_member_message(&self) -> PollinationMessage<A> {
+    fn request_membership_message(&self) -> PollinationMessage<A> {
         // Include all of our peers to be included as well
         let mut msg = self.update_message(&EventTree::new());
         msg.new_membership = NewMembership::Request;
@@ -156,19 +156,25 @@ where
     #[tracing::instrument(skip(self))]
     fn handle_skew(&self, message: PollinationMessage<A>) -> PollinationMessage<A> {
         // TODO: Swap compares to be self.compare(other)
-        match message.unique_count.cmp(&self.unique_count()) {
+        // TODO: Safe expect but not great
+        let peer_map: ItcMap<NodeInfo<A>> =
+            ItcMap::from_patch(message.patch.expect("Patch"));
+
+        let (a, b) = unique_diff_count(&self.core_map, &peer_map);
+        //match message.unique_count.cmp(&self.unique_count()) {
+        match a.cmp(&b) {
             Ordering::Greater => {
-                info!("Peer has greater unique_count; request membership");
-                self.new_member_message()
-            }
-            Ordering::Less => {
                 info!("Peer has lower unique_count; send update");
                 self.update_message(&EventTree::new())
+            }
+            Ordering::Less => {
+                info!("Peer has greater unique_count; request membership");
+                self.request_membership_message()
             }
             Ordering::Equal => {
                 if message.membership_hash > self.membership_hash() {
                     info!("Membership hash of peer is greater; request membership");
-                    self.new_member_message()
+                    self.request_membership_message()
                 } else {
                     info!("Membership hash of peer is lower; heartbeat");
                     self.heartbeat_message()
@@ -225,7 +231,7 @@ where
     /// Take on a peers core_map; merge them
     // TODO: This name is horrible.
     #[tracing::instrument(skip(self))]
-    fn handle_provided_membership(
+    fn handle_new_membership(
         &mut self,
         message: PollinationMessage<A>,
     ) -> Result<Option<PollinationMessage<A>>> {
@@ -302,7 +308,7 @@ where
         }
 
         if message.new_membership.is_provide() {
-            match self.handle_provided_membership(message.clone()) {
+            match self.handle_new_membership(message.clone()) {
                 Ok(Some(msg)) => return Some(msg),
                 Ok(None) => info!("Nothing to do for handling provided membership"),
                 Err(err) => {
