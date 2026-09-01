@@ -21,6 +21,7 @@ jobs:
       - uses: actions/checkout@v4 # repo checkout
       - name: Setup toolchain for wasm
         run: |
+          rustup toolchain install stable --target wasm32-unknown-unknown
           rustup update stable
           rustup default 1.95
           rustup set profile minimal
