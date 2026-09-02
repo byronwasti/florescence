@@ -5,7 +5,7 @@ use petgraph::{
     stable_graph::StableGraph as Graph,
     visit::{EdgeRef, IntoEdgeReferences},
 };
-use rand::Rng;
+use rand::{Rng, RngExt};
 
 #[derive(Debug, Default)]
 pub struct Node {
