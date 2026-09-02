@@ -1,5 +1,5 @@
 use petgraph::graph::NodeIndex;
-use rand::Rng;
+use rand::{Rng, RngExt};
 use std::{cmp::Ordering, collections::BinaryHeap};
 
 #[derive(Debug, Default)]

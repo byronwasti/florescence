@@ -1,6 +1,6 @@
 use crate::{config::Config, history::*, mailbox::Mailbox, traits::*};
 use petgraph::graph::NodeIndex;
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 use std::panic;
 use thiserror::Error;
 
