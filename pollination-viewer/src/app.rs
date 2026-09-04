@@ -49,6 +49,7 @@ struct EphemeralState {
     step: bool,
     scene: Rect,
     force_graph_state: ForceGraphState,
+    run_to_convergence: bool,
 }
 
 impl EphemeralState {
@@ -60,6 +61,7 @@ impl EphemeralState {
             step: false,
             scene: Rect::ZERO,
             force_graph_state,
+            run_to_convergence: false,
         }
     }
 }
@@ -82,6 +84,14 @@ impl eframe::App for PollinationViewer {
             if history.records().len() >= 2 * self.d.truncate_to {
                 history.truncate(self.d.truncate_to);
             }
+        }
+
+        if self.e.run_to_convergence && !has_converged(&self.e.sim) {
+            for _ in 0..self.d.step_count {
+                self.e.sim.step();
+            }
+        } else {
+            self.e.run_to_convergence = false;
         }
     }
 
@@ -200,6 +210,10 @@ impl PollinationViewer {
     fn draw_controls(&mut self, ui: &egui::Ui, _frame: &mut eframe::Frame) {
         egui::Window::new("Sim Controls").show(ui, |ui| {
             ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Seed");
+                    ui.add(egui::DragValue::new(&mut self.d.sim_config.seed).speed(1));
+                });
                 ui.add(
                     egui::Slider::new(&mut self.d.sim_config.node_count, 0..=1000)
                         .text("Node count"),
@@ -214,6 +228,11 @@ impl PollinationViewer {
                 self.e.step = ui.button("Step").clicked();
                 if let Some(panic) = self.e.sim.panic_msg() {
                     ui.label(format!("PANIC {panic}"));
+                }
+
+                ui.toggle_value(&mut self.e.run_to_convergence, "Run to convergence");
+                if self.e.run_to_convergence {
+                    ui.spinner();
                 }
             })
         });
@@ -302,4 +321,15 @@ fn hashable_to_color<T: Hash>(hashable: T) -> Color32 {
     let green = (hash >> 8) as u8;
     let blue = (hash >> 16) as u8;
     Color32::from_rgb(red, green, blue)
+}
+
+fn has_converged(sim: &Sim<SimulatedPollinationCore>) -> bool {
+    let mut nodes = sim.nodes();
+    let Some(first) = nodes.next() else {
+        return true;
+    };
+
+    let membership_hash = first.inner().membership_hash();
+
+    nodes.all(|n| n.inner().membership_hash() == membership_hash)
 }
