@@ -11,13 +11,14 @@ use std::collections::HashMap;
 pub struct History<S: Simulee> {
     records: Vec<HistoricalRecord<S>>,
     wall_time: u64,
+    event_time: u64,
     index: HistoricalIndex,
 }
 
 impl<S: Simulee> History<S> {
     /// Returns the event time
     pub fn time(&self) -> u64 {
-        self.records.len() as u64
+        self.event_time
     }
 
     /// Returns the wall time
@@ -55,6 +56,7 @@ impl<S: Simulee> History<S> {
         }
 
         self.records.push(record);
+        self.event_time +=1;
     }
 }
 
@@ -63,6 +65,7 @@ impl<S: Simulee> Default for History<S> {
         Self {
             records: vec![],
             wall_time: 0,
+            event_time: 0,
             index: HistoricalIndex::default(),
         }
     }
