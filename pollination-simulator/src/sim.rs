@@ -91,6 +91,10 @@ impl<S: Simulee> Sim<S> {
         &self.history
     }
 
+    pub fn history_mut(&mut self) -> &mut History<S> {
+        &mut self.history
+    }
+
     pub fn panic_msg(&self) -> Option<&str> {
         self.panic_msg.as_deref()
     }

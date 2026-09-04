@@ -27,8 +27,17 @@ impl<S: Simulee> History<S> {
         self.wall_time
     }
 
-    pub fn records(&self) -> impl Iterator<Item = &HistoricalRecord<S>> {
+    pub fn records(&self) -> &[HistoricalRecord<S>] {
+        &self.records
+    }
+
+    pub fn records_iter(&self) -> impl Iterator<Item = &HistoricalRecord<S>> {
         self.records.iter()
+    }
+
+    pub fn truncate(&mut self, count: usize) {
+        let to_cut = self.records.len() - count;
+        self.records.drain(..to_cut);
     }
 
     /// Record a record. English is fun.

@@ -4,8 +4,10 @@ use egui::{
     Color32, Frame, Painter, Pos2, Rect, Scene, ScrollArea, Sense, Shape, Stroke, Ui, Vec2, emath,
     pos2, vec2,
 };
-use pollination_simulation::core::{PollinationConfig, SimulatedPollinationCore, PollinationMessage, PollinationEvent};
-use pollination_simulator::{Config, Sim, history::HistoricalRecord, Mail, NodeIndex};
+use pollination_simulation::core::{
+    PollinationConfig, PollinationEvent, PollinationMessage, SimulatedPollinationCore,
+};
+use pollination_simulator::{Config, Mail, NodeIndex, Sim, history::HistoricalRecord};
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
@@ -21,6 +23,8 @@ pub struct PollinationViewer {
 struct DurableState {
     sim_config: Config<PollinationConfig>,
     step_count: usize,
+    truncate_history: bool,
+    truncate_to: usize,
 }
 
 impl Default for DurableState {
@@ -34,6 +38,8 @@ impl Default for DurableState {
                     rand_robin_count: 2,
                 },
             },
+            truncate_history: true,
+            truncate_to: 1000,
         }
     }
 }
@@ -68,6 +74,13 @@ impl eframe::App for PollinationViewer {
             println!("Simulation Step ({}x)", self.d.step_count);
             for _ in 0..self.d.step_count {
                 self.e.sim.step();
+            }
+        }
+
+        if self.d.truncate_history {
+            let history = self.e.sim.history_mut();
+            if history.records().len() >= 2 * self.d.truncate_to {
+                history.truncate(self.d.truncate_to);
             }
         }
     }
@@ -113,8 +126,12 @@ impl PollinationViewer {
         });
     }
 
-    fn draw_history(&self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn draw_history(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::Window::new("History").show(ui, |ui| {
+            ui.checkbox(&mut self.d.truncate_history, "Truncate history");
+            if self.d.truncate_history {
+                ui.add(egui::Slider::new(&mut self.d.truncate_to, 1..=10000).text("Truncate to"));
+            }
             ScrollArea::vertical()
                 .stick_to_bottom(true)
                 .auto_shrink(true)
@@ -122,15 +139,17 @@ impl PollinationViewer {
                     let history = self.e.sim.history();
                     ui.label(format!("Event time {}", history.time()));
                     ui.label(format!("Wall time {}", history.wall_time()));
-                    for (time, record) in history.records().enumerate() {
+
+                    for (time, record) in history.records_iter().enumerate() {
                         match record {
                             HistoricalRecord::NodeEvent(record) => {
-                                let from_node = if matches!(record.event, PollinationEvent::HandleMessage) {
-                                    let msg = record.msg_in.as_ref().expect("Some message");
-                                    format!("from={:?}", msg.from)
-                                } else {
-                                    "".to_string()
-                                };
+                                let from_node =
+                                    if matches!(record.event, PollinationEvent::HandleMessage) {
+                                        let msg = record.msg_in.as_ref().expect("Some message");
+                                        format!("from={:?}", msg.from)
+                                    } else {
+                                        "".to_string()
+                                    };
                                 ui.collapsing(
                                     format!(
                                         "{time} NodeId={:?} event={:?} {}",
@@ -170,7 +189,11 @@ impl PollinationViewer {
         ui.label(format!("{:?} => {} ({:?})", &msg.from, &msg.msg, msg.sort));
     }
 
-    fn draw_msg_out(&self, ui: &mut egui::Ui, (to, msg): &(NodeIndex, PollinationMessage<NodeIndex>)) {
+    fn draw_msg_out(
+        &self,
+        ui: &mut egui::Ui,
+        (to, msg): &(NodeIndex, PollinationMessage<NodeIndex>),
+    ) {
         ui.label(format!("{:?} => {}", to, &msg));
     }
 
@@ -178,7 +201,8 @@ impl PollinationViewer {
         egui::Window::new("Sim Controls").show(ui, |ui| {
             ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
                 ui.add(
-                    egui::Slider::new(&mut self.d.sim_config.node_count, 0..=1000).text("Node count"),
+                    egui::Slider::new(&mut self.d.sim_config.node_count, 0..=1000)
+                        .text("Node count"),
                 );
                 if ui.button("Reset").clicked() {
                     self.e = EphemeralState::new(&self.d);
