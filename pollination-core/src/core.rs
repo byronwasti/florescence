@@ -613,6 +613,10 @@ impl MembershipHash {
 
         Self(hash)
     }
+
+    pub fn u64(&self) -> u64 {
+        self.0
+    }
 }
 
 #[cfg(test)]

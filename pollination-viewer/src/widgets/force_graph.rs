@@ -28,7 +28,7 @@ pub struct ForceGraphWidget<'a> {
     state: &'a mut ForceGraphState,
     node_color_provider: Option<&'a dyn Fn(u32) -> (Color32, Color32)>,
     edge_color_provider: Option<&'a dyn Fn(u32, u32) -> Color32>,
-    info_provider: Option<&'a dyn Fn(NodeIndex, &mut egui::Ui)>,
+    info_provider: Option<&'a dyn Fn(&mut egui::Ui, NodeIndex)>,
 }
 
 impl Widget for ForceGraphWidget<'_> {
@@ -76,7 +76,7 @@ impl<'a> ForceGraphWidget<'a> {
 
     pub fn with_node_info_provider(
         mut self,
-        info_provider: &'a dyn Fn(NodeIndex, &mut egui::Ui),
+        info_provider: &'a dyn Fn(&mut egui::Ui, NodeIndex),
     ) -> Self {
         self.info_provider = Some(info_provider);
         self
@@ -162,7 +162,7 @@ impl<'a> ForceGraphWidget<'a> {
                     remove_id = Some(*node_idx)
                 }
 
-                info_provider(*node_idx, ui);
+                info_provider(ui, *node_idx);
             });
         }
 

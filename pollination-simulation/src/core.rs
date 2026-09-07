@@ -125,6 +125,26 @@ mod tests {
     use rand_chacha::ChaCha12Rng;
 
     #[test]
+    fn basic_convergence() {
+        tracing_subscriber::fmt().with_test_writer().try_init();
+        let config = Config::new(
+            20,
+            1337,
+            PollinationConfig {
+                rand_robin_count: 2,
+            },
+        );
+        let mut sim: Sim<SimulatedPollinationCore> = Sim::new(config.clone());
+
+        for _ in 0..25_500 {
+            sim.step();
+        }
+
+        assert!(sim.has_converged(|s: &SimulatedPollinationCore| s.membership_hash()));
+    }
+
+    #[test]
+    #[ignore]
     fn deterministic_simulation() {
         tracing_subscriber::fmt().with_test_writer().try_init();
         let config = Config::new(

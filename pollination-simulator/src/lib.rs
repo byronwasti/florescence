@@ -9,4 +9,5 @@ pub use config::Config;
 pub use mailbox::{Delivery, Mail};
 pub use petgraph::graph::NodeIndex;
 pub use sim::{Sim, SimError};
+pub use sim_node::SimNode;
 pub use traits::Simulee;

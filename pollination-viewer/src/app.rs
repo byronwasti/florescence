@@ -4,12 +4,13 @@ use egui::{
     Color32, Frame, Painter, Pos2, Rect, Scene, ScrollArea, Sense, Shape, Stroke, Ui, Vec2, emath,
     pos2, vec2,
 };
+use egui_plot::{Legend, Line, Plot, PlotPoints, HoverPosition};
 use pollination_simulation::core::{
-    PollinationConfig, PollinationEvent, PollinationMessage, SimulatedPollinationCore,
+    PollinationConfig, PollinationEvent, PollinationMessage, SimulatedPollinationCore, PollinationCore,
 };
-use pollination_simulator::{Config, Mail, NodeIndex, Sim, history::HistoricalRecord};
+use pollination_simulator::{Config, Mail, NodeIndex, Sim, SimNode, history::HistoricalRecord};
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{HashMap, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
 };
 
@@ -90,6 +91,7 @@ impl eframe::App for PollinationViewer {
             for _ in 0..self.d.step_count {
                 self.e.sim.step();
             }
+            ctx.request_repaint();
         } else {
             self.e.run_to_convergence = false;
         }
@@ -99,6 +101,7 @@ impl eframe::App for PollinationViewer {
         self.draw_header(ui, frame);
         self.draw_history(ui, frame);
         self.draw_controls(ui, frame);
+        self.draw_membership_hash_distribution(ui, frame);
         self.draw_scene(ui, frame);
     }
 }
@@ -150,7 +153,7 @@ impl PollinationViewer {
             }
             ScrollArea::vertical()
                 .stick_to_bottom(true)
-                .auto_shrink(true)
+                //.auto_shrink(true)
                 .show(ui, |ui| {
                     let history = self.e.sim.history();
                     ui.label(format!("Event time {}", history.time()));
@@ -176,6 +179,9 @@ impl PollinationViewer {
                                         record.id, record.event, from_node,
                                     ),
                                     |ui| {
+                                        ui.collapsing("Pre Node State", |ui| {
+                                            draw_node_info(ui, record.snapshot.inner());
+                                        });
                                         ui.collapsing("Msg In", |ui| {
                                             self.draw_msg_in(ui, record.msg_in.as_ref());
                                         });
@@ -183,7 +189,6 @@ impl PollinationViewer {
                                             for msg in record.msgs_out.iter() {
                                                 self.draw_msg_out(ui, msg);
                                             }
-                                            //ui.label(format!("msgs_out={:?}", record.msgs_out));
                                         });
                                     },
                                 );
@@ -248,6 +253,12 @@ impl PollinationViewer {
         });
     }
 
+    fn draw_membership_hash_distribution(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        egui::Window::new("Membership Hash Distribution").show(ui, |ui| {
+            draw_membership_hash_distribution_plot(ui, &self.e.sim);
+        });
+    }
+
     fn draw_scene(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let frame = egui::containers::Frame::new()
             .inner_margin(egui::Margin::ZERO)
@@ -273,42 +284,11 @@ impl PollinationViewer {
                                     hashable_to_color(membership_hash),
                                 )
                             })
-                            .with_node_info_provider(&|id, ui| {
+                            .with_node_info_provider(&|ui, id| {
                                 let Some(node) = self.e.sim.get_node(id) else {
                                     return;
                                 };
-                                egui::ScrollArea::vertical()
-                                    .auto_shrink(true)
-                                    .show(ui, |ui| {
-                                        ui.label(format!("Node Index: {}", node.id.index()));
-                                        ui.label(format!(
-                                            "Membership Hash: {:?}",
-                                            node.inner().membership_hash()
-                                        ));
-
-                                        ui.collapsing("State", |ui| {
-                                            let node = node.inner().inner();
-                                            ui.label(format!("UUID: {}", node.uuid()));
-                                            ui.label(format!("ItcId: {}", node.id()));
-                                            ui.label(format!("Timestamp: {}", node.timestamp()));
-                                            ui.label(format!("Own Info: {:?}", node.own_info()));
-                                            ui.collapsing("Map", |ui| {
-                                                for (id, d) in node.core_map().iter() {
-                                                    ui.label(format!("{id} -> {d:?}"));
-                                                }
-                                            });
-                                        });
-
-                                        ui.collapsing("Mailbox", |ui| {
-                                            for mail in node.mailbox.iter() {
-                                                ui.label(format!(
-                                                    "{} -> {:?}",
-                                                    mail.from.index(),
-                                                    mail.msg
-                                                ));
-                                            }
-                                        });
-                                    });
+                                draw_sim_node_info(ui, node);
                             }),
                     )
                 });
@@ -335,12 +315,122 @@ fn hashable_to_color<T: Hash>(hashable: T) -> Color32 {
 }
 
 fn has_converged(sim: &Sim<SimulatedPollinationCore>) -> bool {
-    let mut nodes = sim.nodes();
-    let Some(first) = nodes.next() else {
-        return true;
-    };
+    sim.has_converged(|s: &SimulatedPollinationCore| s.membership_hash())
+}
 
-    let membership_hash = first.inner().membership_hash();
+/* Pseudo Components */
 
-    nodes.all(|n| n.inner().membership_hash() == membership_hash)
+fn draw_sim_node_info(ui: &mut Ui, node: &SimNode<SimulatedPollinationCore>) {
+    egui::ScrollArea::vertical()
+        .auto_shrink(true)
+        .show(ui, |ui| {
+            ui.label(format!("Node Index: {}", node.id.index()));
+
+            ui.collapsing("State", |ui| {
+                let node = node.inner().inner();
+                draw_node_info(ui, &node);
+            });
+
+            ui.collapsing("Mailbox", |ui| {
+                for mail in node.mailbox.iter() {
+                    ui.label(format!(
+                            "{} -> {:?}",
+                            mail.from.index(),
+                            mail.msg
+                    ));
+                }
+            });
+        });
+}
+
+fn draw_node_info(ui: &mut Ui, node: &PollinationCore<NodeIndex>) {
+    ui.label(format!("UUID: {}", node.uuid()));
+    ui.label(format!("Membership Hash: {:?}", node.membership_hash()));
+    ui.label(format!("ItcId: {}", node.id()));
+    ui.label(format!("Timestamp: {}", node.timestamp()));
+    ui.label(format!("Own Info: {:?}", node.own_info()));
+    ui.collapsing(format!("Map ({})", node.core_map().len()), |ui| {
+        for (id, d) in node.core_map().iter() {
+            ui.label(format!("{id} -> {d:?}"));
+        }
+    });
+}
+
+
+/// Plots, for every distinct membership hash that has appeared in the (possibly
+/// truncated) history, how many nodes currently carry that hash, over event time.
+/// A converging simulation shows its hash groups merging into a single line that
+/// climbs to the total node count.
+fn draw_membership_hash_distribution_plot(ui: &mut Ui, sim: &Sim<SimulatedPollinationCore>) {
+    let history = sim.history();
+    let node_count = sim.nodes().count();
+
+    // Event time of the first record still retained in the (possibly truncated) history.
+    let start_time = history.time() - history.records().len() as u64;
+
+    // Replay history, tracking each node's latest known membership hash so we can
+    // derive, at every state change, how many nodes currently belong to each group.
+    let mut latest: HashMap<NodeIndex, u64> = HashMap::new();
+    let mut counts: HashMap<u64, usize> = HashMap::new();
+    let mut series: HashMap<u64, Vec<(f64, f64)>> = HashMap::new();
+
+    for (offset, record) in history.records_iter().enumerate() {
+        let HistoricalRecord::NodeEvent(node_record) = record else {
+            continue;
+        };
+
+        let new_hash = node_record.snapshot.membership_hash().u64();
+        let old_hash = latest.insert(node_record.id, new_hash);
+        if old_hash == Some(new_hash) {
+            continue;
+        }
+
+        let event_time = (start_time + offset as u64) as f64;
+
+        if let Some(old_hash) = old_hash {
+            let count = counts.entry(old_hash).or_insert(0);
+            *count -= 1;
+            series.entry(old_hash).or_default().push((event_time, *count as f64));
+        }
+
+        let count = counts.entry(new_hash).or_insert(0);
+        *count += 1;
+        series.entry(new_hash).or_default().push((event_time, *count as f64));
+    }
+
+    ui.label("Membership Hash Distribution");
+
+    if series.is_empty() {
+        ui.label("No history yet.");
+        return;
+    }
+
+    let mut hashes: Vec<u64> = series.keys().copied().collect();
+    hashes.sort_unstable();
+
+    Plot::new("membership_hash_distribution")
+        .height(200.0)
+        //.legend(Legend::default())
+        .include_y(0.0)
+        .include_y(node_count as f64)
+        .show_crosshair(true)
+        .x_axis_label("Event Time")
+        .y_axis_label("Node Count")
+        .label_formatter(|pos| match pos {
+            HoverPosition::NearDataPoint { plot_name, position, .. } if !plot_name.is_empty() => {
+                Some(format!("{}: {}", plot_name, position.y))
+            }
+            _ => None,
+        })
+        .show(ui, |plot_ui| {
+            for hash in hashes {
+                let points: Vec<[f64; 2]> = series[&hash]
+                    .iter()
+                    .map(|&(time, count)| [time, count])
+                    .collect();
+                let line = Line::new(format!("{hash}"), PlotPoints::new(points))
+                    .color(hashable_to_color(hash));
+                plot_ui.line(line);
+            }
+        });
 }

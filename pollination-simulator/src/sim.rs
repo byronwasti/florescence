@@ -121,6 +121,21 @@ impl<S: Simulee> Sim<S> {
     pub fn node_ids(&self) -> Vec<NodeIndex> {
         self.nodes.node_weights().map(|x| x.id).collect()
     }
+
+    pub fn has_converged<F, U>(&self, compare_key_fn: F) -> bool
+    where
+        F: Fn(&S) -> U,
+        U: PartialEq,
+    {
+        let mut nodes = self.nodes();
+        let Some(first) = nodes.next() else {
+            return true;
+        };
+
+        let first = compare_key_fn(first.inner());
+
+        nodes.all(|n| compare_key_fn(n.inner()) == first)
+    }
 }
 
 fn new_graph<R: Rng + ?Sized, S: Simulee>(
