@@ -56,7 +56,7 @@ impl<S: Simulee> History<S> {
         }
 
         self.records.push(record);
-        self.event_time +=1;
+        self.event_time += 1;
     }
 }
 

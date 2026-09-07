@@ -5,7 +5,7 @@ use std::{
     mem,
 };
 use thiserror::Error;
-use tracing::{error, info, debug};
+use tracing::{debug, error, info};
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 use uuid::Uuid;
 
@@ -173,8 +173,7 @@ where
     #[tracing::instrument(skip_all)]
     fn handle_skew_patch(&self, message: PollinationMessage<A>) -> PollinationMessage<A> {
         // TODO: Safe expect but not great
-        let peer_map: ItcMap<NodeInfo<A>> =
-            ItcMap::from_patch(message.patch.expect("Patch"));
+        let peer_map: ItcMap<NodeInfo<A>> = ItcMap::from_patch(message.patch.expect("Patch"));
 
         let (a, b) = unique_diff_count(&self.core_map, &peer_map);
         //match message.unique_count.cmp(&self.unique_count()) {
@@ -492,15 +491,11 @@ fn unique_diff_count<A>(map_a: &ItcMap<NodeInfo<A>>, map_b: &ItcMap<NodeInfo<A>>
 
     let diff_a = entries_a
         .iter()
-        .filter(|(d0, t0)| {
-            !entries_b.contains_key(d0)
-        })
+        .filter(|(d0, t0)| !entries_b.contains_key(d0))
         .count() as i64;
     let diff_b = entries_b
         .iter()
-        .filter(|(d0, t0)| {
-            !entries_a.contains_key(d0)
-        })
+        .filter(|(d0, t0)| !entries_a.contains_key(d0))
         .count() as i64;
 
     (diff_a, diff_b)
