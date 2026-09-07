@@ -150,7 +150,7 @@ impl PollinationViewer {
                     ui.label(format!("Event time {}", history.time()));
                     ui.label(format!("Wall time {}", history.wall_time()));
 
-                    for (time, record) in history.records_iter().enumerate() {
+                    for (offset, record) in history.records_iter().enumerate() {
                         match record {
                             HistoricalRecord::NodeEvent(record) => {
                                 let from_node =
@@ -160,9 +160,13 @@ impl PollinationViewer {
                                     } else {
                                         "".to_string()
                                     };
+
+                                // TODO: Move this into the historical record, this is a silly thing
+                                // to do
+                                let event_time = history.time() - history.records().len() as u64 + offset as u64;
                                 ui.collapsing(
                                     format!(
-                                        "{time} NodeId={:?} event={:?} {}",
+                                        "{event_time} NodeId={:?} event={:?} {}",
                                         record.id, record.event, from_node,
                                     ),
                                     |ui| {

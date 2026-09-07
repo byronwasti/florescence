@@ -5,7 +5,7 @@ use std::{
     mem,
 };
 use thiserror::Error;
-use tracing::{error, info};
+use tracing::{error, info, debug};
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 use uuid::Uuid;
 
@@ -161,7 +161,7 @@ where
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip_all)]
     fn handle_skew(&self, message: PollinationMessage<A>) -> PollinationMessage<A> {
         if message.patch.is_some() {
             self.handle_skew_patch(message)
@@ -219,7 +219,7 @@ where
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip_all)]
     fn handle_membership_request(
         &mut self,
         message: PollinationMessage<A>,
@@ -266,7 +266,7 @@ where
     /// Handling a new core_map which has ourselves included.
     /// Take on a peers core_map; merge them
     // TODO: This name is horrible.
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip_all)]
     fn handle_new_membership(
         &mut self,
         message: PollinationMessage<A>,
@@ -325,7 +325,7 @@ where
         &mut self,
         message: PollinationMessage<A>,
     ) -> Option<PollinationMessage<A>> {
-        info!("SELF_DUMP={}", self);
+        debug!("SELF_DUMP={}", self);
         assert_eq!(
             &find_id(&self.core_map, self.uuid()).expect("Self to exist"),
             &self.id
