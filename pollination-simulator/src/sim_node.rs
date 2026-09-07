@@ -29,13 +29,8 @@ impl<S: Simulee> SimNode<S> {
         self.simulee.as_ref().expect("Expected simulee")
     }
 
-    pub fn push_mailbox<R: Rng + ?Sized>(
-        &mut self,
-        rng: &mut R,
-        from: NodeIndex,
-        message: S::Message,
-    ) {
-        self.mailbox.push(rng, from, message);
+    pub fn push_mailbox(&mut self, from: NodeIndex, message: S::Message) {
+        self.mailbox.push(from, message);
     }
 
     pub fn step<R: Rng + ?Sized>(

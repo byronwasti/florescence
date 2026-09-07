@@ -206,7 +206,7 @@ impl PollinationViewer {
             return;
         };
 
-        ui.label(format!("{:?} => {} ({:?})", &msg.from, &msg.msg, msg.sort));
+        ui.label(format!("{:?} => {}", &msg.from, &msg.msg));
     }
 
     fn draw_msg_out(
@@ -268,7 +268,8 @@ impl PollinationViewer {
                                 let membership_hash = node.inner().membership_hash();
                                 let timestamp = node.inner().timestamp();
                                 (
-                                    hashable_to_color(timestamp),
+                                    //hashable_to_color(timestamp),
+                                    hashable_to_color(membership_hash),
                                     hashable_to_color(membership_hash),
                                 )
                             })

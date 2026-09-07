@@ -108,7 +108,7 @@ where
     }
 
     // NOTE: Degrades to be heartbeat_message() if the timestamps are equal
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip_all, fields(timestamp))]
     fn update_message(&self, timestamp: &EventTree) -> PollinationMessage<A> {
         info!("Update");
         let mut msg = self.heartbeat_message();
@@ -325,6 +325,7 @@ where
         message: PollinationMessage<A>,
     ) -> Option<PollinationMessage<A>> {
         debug!("SELF_DUMP={}", self);
+        info!("Message from={}, ItcId={}", message.uuid, message.id);
         assert_eq!(
             &find_id(&self.core_map, self.uuid()).expect("Self to exist"),
             &self.id

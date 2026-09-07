@@ -82,13 +82,14 @@ impl<S: Simulee> Sim<S> {
 
         for (id, msg) in record.msgs_out.iter() {
             let node = self.nodes.node_weight_mut(*id).expect("Node to exist");
-            node.push_mailbox(&mut self.rng, record.id, msg.clone());
+            node.push_mailbox(record.id, msg.clone());
         }
     }
 
     fn random_ordering(&mut self) -> Vec<NodeIndex> {
         let mut node_ids: Vec<_> = (0..self.nodes.node_count()).map(NodeIndex::new).collect();
-        // TODO: Remove this comment out
+        // XXX: Ideally we go through a random order of the nodes each time, but for some
+        // reason this introduces non-determinism and I haven't been able to root-cause why.
         node_ids.shuffle(&mut self.rng);
         node_ids
     }

@@ -64,7 +64,7 @@ impl Simulee for SimulatedPollinationCore {
         });
 
         events.push(StepOptions::Skip);
-        weights.push(2);
+        weights.push(5);
 
         let dist = WeightedIndex::new(&weights).expect("Invalid random weights");
         let event = events[dist.sample(rng)];
@@ -129,7 +129,7 @@ mod tests {
         tracing_subscriber::fmt().with_test_writer().try_init();
         let config = Config::new(
             12,
-            1235,
+            1236,
             PollinationConfig {
                 rand_robin_count: 2,
             },
@@ -138,7 +138,7 @@ mod tests {
         let mut sim2: Sim<SimulatedPollinationCore> = Sim::new(config);
 
         for idx in 0..1000 {
-            println!("{idx}");
+            println!("============================== {idx} ================================");
             sim1.step();
             println!("Sim1: {:?}", sim1.history().last());
 
@@ -147,7 +147,14 @@ mod tests {
 
             let s1: u8 = sim1.dangerous_get_rng().random();
             let s2: u8 = sim2.dangerous_get_rng().random();
+            assert_eq!(s1, s2);
 
+            let s1: u8 = sim1.dangerous_get_rng().random();
+            let s2: u8 = sim2.dangerous_get_rng().random();
+            assert_eq!(s1, s2);
+
+            let s1: u8 = sim1.dangerous_get_rng().random();
+            let s2: u8 = sim2.dangerous_get_rng().random();
             assert_eq!(s1, s2);
         }
     }
