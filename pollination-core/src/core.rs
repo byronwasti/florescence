@@ -458,20 +458,13 @@ fn non_present<A>(map_a: &ItcMap<NodeInfo<A>>, map_b: &ItcMap<NodeInfo<A>>) -> V
 where
     NodeInfo<A>: Clone,
 {
-    let entries_a = map_a
-        .iter()
-        .map(|(_, d)| (d.uuid, d))
-        .collect::<HashMap<_, _>>();
-    let entries_b = map_b
-        .iter()
-        .map(|(_, d)| (d.uuid, d))
-        .collect::<HashMap<_, _>>();
+    let entries_b = map_b.iter().map(|(_, d)| d.uuid).collect::<HashSet<_>>();
 
-    entries_a
+    map_a
         .iter()
-        .filter_map(|(uuid, &d0)| {
-            if !entries_b.contains_key(uuid) {
-                Some((*d0).to_owned())
+        .filter_map(|(_, d)| {
+            if !entries_b.contains(&d.uuid) {
+                Some(d.to_owned())
             } else {
                 None
             }

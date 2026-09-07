@@ -59,7 +59,7 @@ impl EphemeralState {
         Self {
             sim,
             step: false,
-            scene: Rect::ZERO,
+            scene: Rect::from_two_pos(Pos2::new(-500.0, -300.0), Pos2::new(500.0, 300.0)),
             force_graph_state,
             run_to_convergence: false,
         }
@@ -115,6 +115,12 @@ impl PollinationViewer {
             e: EphemeralState::new(&saved),
             d: saved,
         }
+    }
+
+    fn reset(&mut self) {
+        let scene = self.e.scene;
+        self.e = EphemeralState::new(&self.d);
+        self.e.scene = scene;
     }
 
     fn draw_header(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -223,7 +229,7 @@ impl PollinationViewer {
                         .text("Node count"),
                 );
                 if ui.button("Reset").clicked() {
-                    self.e = EphemeralState::new(&self.d);
+                    self.reset();
                 }
 
                 ui.separator();
