@@ -1,5 +1,6 @@
 use petgraph::{graph::NodeIndex, stable_graph::StableGraph};
 use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
+use rand_chacha::ChaCha12Rng;
 use thiserror::Error;
 
 use crate::{config::*, history::*, sim_node::*, traits::*};
@@ -8,7 +9,7 @@ pub struct Sim<S: Simulee> {
     pub history: History<S>,
     // TODO: The usage of PetGraph for this is entirely unnecessary
     nodes: StableGraph<SimNode<S>, ()>,
-    rng: StdRng,
+    rng: ChaCha12Rng,
     panic_msg: Option<String>,
     config: Config<S::Config>,
 }
@@ -16,7 +17,7 @@ pub struct Sim<S: Simulee> {
 impl<S: Simulee> Sim<S> {
     pub fn new(config: Config<S::Config>) -> Self {
         let history = History::default();
-        let mut rng = StdRng::seed_from_u64(config.seed);
+        let mut rng = ChaCha12Rng::seed_from_u64(config.seed);
         let nodes = new_graph(&mut rng, &config);
 
         Self {
@@ -43,6 +44,10 @@ impl<S: Simulee> Sim<S> {
         self.history.record(record);
 
         Ok(())
+    }
+
+    pub fn dangerous_get_rng(&mut self) -> &mut ChaCha12Rng {
+        &mut self.rng
     }
 
     fn step_inner(&mut self) -> HistoricalRecord<S> {
@@ -83,6 +88,7 @@ impl<S: Simulee> Sim<S> {
 
     fn random_ordering(&mut self) -> Vec<NodeIndex> {
         let mut node_ids: Vec<_> = (0..self.nodes.node_count()).map(NodeIndex::new).collect();
+        // TODO: Remove this comment out
         node_ids.shuffle(&mut self.rng);
         node_ids
     }

@@ -41,6 +41,10 @@ impl<S: Simulee> History<S> {
         self.records.drain(..to_cut);
     }
 
+    pub fn last(&self) -> Option<&HistoricalRecord<S>> {
+        self.records.last()
+    }
+
     /// Record a record. English is fun.
     /// Increments the `event_time` always.
     /// Increments the `wall_time` when given `None`.

@@ -473,22 +473,16 @@ where
 }
 
 fn unique_diff_count<A>(map_a: &ItcMap<NodeInfo<A>>, map_b: &ItcMap<NodeInfo<A>>) -> (i64, i64) {
-    let entries_a = map_a
-        .iter()
-        .map(|(_, d)| (d.uuid, d.timestamp))
-        .collect::<HashMap<_, _>>();
-    let entries_b = map_b
-        .iter()
-        .map(|(_, d)| (d.uuid, d.timestamp))
-        .collect::<HashMap<_, _>>();
+    let entries_a = map_a.iter().map(|(_, d)| d.uuid).collect::<HashSet<_>>();
+    let entries_b = map_b.iter().map(|(_, d)| d.uuid).collect::<HashSet<_>>();
 
-    let diff_a = entries_a
+    let diff_a = map_a
         .iter()
-        .filter(|(d0, t0)| !entries_b.contains_key(d0))
+        .filter(|(_, d)| !entries_b.contains(&d.uuid))
         .count() as i64;
-    let diff_b = entries_b
+    let diff_b = map_b
         .iter()
-        .filter(|(d0, t0)| !entries_a.contains_key(d0))
+        .filter(|(_, d)| !entries_a.contains(&d.uuid))
         .count() as i64;
 
     (diff_a, diff_b)
@@ -563,7 +557,7 @@ pub type Result<T> = std::result::Result<T, PollinationError>;
 
 // NodeInfo
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NodeInfo<A> {
     uuid: Uuid,
     addr: A,

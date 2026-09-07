@@ -1,6 +1,7 @@
 use crate::{config::Config, history::*, mailbox::Mailbox, traits::*};
 use petgraph::graph::NodeIndex;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
+use rand_chacha::ChaCha12Rng;
 use std::panic;
 use thiserror::Error;
 
@@ -61,7 +62,7 @@ impl<S: Simulee> SimNode<S> {
         let seed = rng.random();
         let res = panic::catch_unwind(move || {
             // Can't pass an Rng across the unwind boundary, so just reseed a new one.
-            let mut rng = StdRng::seed_from_u64(seed);
+            let mut rng = ChaCha12Rng::seed_from_u64(seed);
             let res = simulee.step(&mut rng, &config, nodes, wall_time, &mut delivery);
             (simulee, delivery, res)
         })

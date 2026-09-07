@@ -77,14 +77,14 @@ impl Simulee for SimulatedPollinationCore {
 
                 let msgs = nodes
                     .iter()
-                    .choose_multiple(rng, config.custom.rand_robin_count)
+                    .sample(rng, config.custom.rand_robin_count)
                     .into_iter()
                     .map(|id| (*id, msg.clone()))
                     .collect();
 
                 Some((PollinationEvent::Heartbeat, msgs))
             }
-            StepOptions::HandleMessage => {
+            StepOptionHandleMessage => {
                 let mail = delivery.as_mut()?.take();
                 let from = mail.from;
                 let msg = mail.msg;
@@ -116,4 +116,59 @@ pub enum PollinationEvent<A> {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct PollinationConfig {
     pub rand_robin_count: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pollination_simulator::Sim;
+    use rand_chacha::ChaCha12Rng;
+
+    #[test]
+    fn deterministic_simulation() {
+        tracing_subscriber::fmt().with_test_writer().try_init();
+        let config = Config::new(
+            12,
+            1235,
+            PollinationConfig {
+                rand_robin_count: 2,
+            },
+        );
+        let mut sim1: Sim<SimulatedPollinationCore> = Sim::new(config.clone());
+        let mut sim2: Sim<SimulatedPollinationCore> = Sim::new(config);
+
+        for idx in 0..1000 {
+            println!("{idx}");
+            sim1.step();
+            println!("Sim1: {:?}", sim1.history().last());
+
+            sim2.step();
+            println!("Sim2: {:?}", sim2.history().last());
+
+            let s1: u8 = sim1.dangerous_get_rng().random();
+            let s2: u8 = sim2.dangerous_get_rng().random();
+
+            assert_eq!(s1, s2);
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn deterministic_shuffle() {
+        tracing_subscriber::fmt().with_test_writer().try_init();
+        let seed = 1234;
+        let mut rng1 = ChaCha12Rng::seed_from_u64(seed);
+        let mut rng2 = ChaCha12Rng::seed_from_u64(seed);
+
+        for idx in 0..10000 {
+            let mut arr1 = (0..20).collect::<Vec<_>>();
+            let mut arr2 = (0..20).collect::<Vec<_>>();
+
+            arr1.shuffle(&mut rng1);
+            arr2.shuffle(&mut rng2);
+
+            assert_eq!(&arr1, &arr2);
+            assert_eq!(rng1.random::<u64>(), rng2.random::<u64>());
+        }
+    }
 }
