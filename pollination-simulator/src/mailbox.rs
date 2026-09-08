@@ -5,13 +5,15 @@ use std::{cmp::Ordering, collections::VecDeque};
 #[derive(Debug, Default)]
 pub struct Mailbox<Message> {
     counter: u64,
+    size: usize,
     inner: VecDeque<Mail<Message>>,
 }
 
 impl<Message> Mailbox<Message> {
-    pub fn new() -> Mailbox<Message> {
+    pub fn new(size: usize) -> Mailbox<Message> {
         Self {
             counter: 0,
+            size,
             inner: VecDeque::new(),
         }
     }
@@ -23,6 +25,9 @@ impl<Message> Mailbox<Message> {
 
     pub fn push_mail(&mut self, mail: Mail<Message>) {
         self.inner.push_back(mail);
+        if self.size > 0 && self.inner.len() > self.size {
+            let _ = self.inner.pop_front();
+        }
     }
 
     /// Returns a tuple of (Mail, Delivery) to fascillitate history.

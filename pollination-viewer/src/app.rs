@@ -35,6 +35,7 @@ impl Default for DurableState {
             sim_config: Config {
                 node_count: 3,
                 seed: 1234,
+                message_queue_size: 5,
                 custom: PollinationConfig {
                     rand_robin_count: 2,
                 },
@@ -51,6 +52,7 @@ struct EphemeralState {
     scene: Rect,
     force_graph_state: ForceGraphState,
     run_to_convergence: bool,
+    plot_cache: Cached<MembershipPlotSeries>,
 }
 
 impl EphemeralState {
@@ -63,6 +65,7 @@ impl EphemeralState {
             scene: Rect::from_two_pos(Pos2::new(-500.0, -300.0), Pos2::new(500.0, 300.0)),
             force_graph_state,
             run_to_convergence: false,
+            plot_cache: Cached::new(),
         }
     }
 }
@@ -75,9 +78,7 @@ impl eframe::App for PollinationViewer {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         if self.e.step {
             println!("Simulation Step ({}x)", self.d.step_count);
-            for _ in 0..self.d.step_count {
-                self.e.sim.step();
-            }
+            self.run_steps_by_count();
         }
 
         if self.d.truncate_history {
@@ -88,9 +89,7 @@ impl eframe::App for PollinationViewer {
         }
 
         if self.e.run_to_convergence && !has_converged(&self.e.sim) {
-            for _ in 0..self.d.step_count {
-                self.e.sim.step();
-            }
+            self.run_steps_by_count();
             ctx.request_repaint();
         } else {
             self.e.run_to_convergence = false;
@@ -124,6 +123,13 @@ impl PollinationViewer {
         let scene = self.e.scene;
         self.e = EphemeralState::new(&self.d);
         self.e.scene = scene;
+    }
+
+    fn run_steps_by_count(&mut self) {
+        for _ in 0..self.d.step_count {
+            self.e.sim.step();
+        }
+        self.e.plot_cache.invalidate();
     }
 
     fn draw_header(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -233,6 +239,11 @@ impl PollinationViewer {
                     egui::Slider::new(&mut self.d.sim_config.node_count, 0..=1000)
                         .text("Node count"),
                 );
+                ui.add(
+                    egui::Slider::new(&mut self.d.sim_config.message_queue_size, 0..=100)
+                        .text("Message queue size"),
+                );
+
                 if ui.button("Reset").clicked() {
                     self.reset();
                 }
@@ -255,7 +266,7 @@ impl PollinationViewer {
 
     fn draw_membership_hash_distribution(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::Window::new("Membership Hash Distribution").show(ui, |ui| {
-            draw_membership_hash_distribution_plot(ui, &self.e.sim);
+            draw_membership_hash_distribution_plot(ui, &mut self.e.plot_cache, &self.e.sim);
         });
     }
 
@@ -318,6 +329,34 @@ fn has_converged(sim: &Sim<SimulatedPollinationCore>) -> bool {
     sim.has_converged(|s: &SimulatedPollinationCore| s.membership_hash())
 }
 
+struct Cached<U> {
+    inner: Option<U>,
+}
+
+impl<U> Cached<U> {
+    pub fn new() -> Self {
+        Self { inner: None }
+    }
+
+    pub fn store(&mut self, inner: U) {
+        self.inner = Some(inner);
+    }
+
+    pub fn invalidate(&mut self) {
+        self.inner = None;
+    }
+
+    pub fn get<F>(&mut self, getter: F) -> &U
+    where F: FnOnce() -> U
+    {
+        if self.inner.is_none() {
+            self.inner = Some(getter());
+        }
+
+        self.inner.as_ref().unwrap()
+    }
+}
+
 /* Pseudo Components */
 
 fn draw_sim_node_info(ui: &mut Ui, node: &SimNode<SimulatedPollinationCore>) {
@@ -356,47 +395,51 @@ fn draw_node_info(ui: &mut Ui, node: &PollinationCore<NodeIndex>) {
     });
 }
 
+type MembershipPlotSeries = HashMap<u64, Vec<(f64, f64)>>;
 
 /// Plots, for every distinct membership hash that has appeared in the (possibly
 /// truncated) history, how many nodes currently carry that hash, over event time.
 /// A converging simulation shows its hash groups merging into a single line that
 /// climbs to the total node count.
-fn draw_membership_hash_distribution_plot(ui: &mut Ui, sim: &Sim<SimulatedPollinationCore>) {
-    let history = sim.history();
+fn draw_membership_hash_distribution_plot(ui: &mut Ui, cache: &mut Cached<MembershipPlotSeries>, sim: &Sim<SimulatedPollinationCore>) {
     let node_count = sim.nodes().count();
+    let series = cache.get(|| {
+        let history = sim.history();
 
-    // Event time of the first record still retained in the (possibly truncated) history.
-    let start_time = history.time() - history.records().len() as u64;
+        // Event time of the first record still retained in the (possibly truncated) history.
+        let start_time = history.time() - history.records().len() as u64;
 
-    // Replay history, tracking each node's latest known membership hash so we can
-    // derive, at every state change, how many nodes currently belong to each group.
-    let mut latest: HashMap<NodeIndex, u64> = HashMap::new();
-    let mut counts: HashMap<u64, usize> = HashMap::new();
-    let mut series: HashMap<u64, Vec<(f64, f64)>> = HashMap::new();
+        // Replay history, tracking each node's latest known membership hash so we can
+        // derive, at every state change, how many nodes currently belong to each group.
+        let mut latest: HashMap<NodeIndex, u64> = HashMap::new();
+        let mut counts: HashMap<u64, usize> = HashMap::new();
+        let mut series: MembershipPlotSeries = HashMap::new();
 
-    for (offset, record) in history.records_iter().enumerate() {
-        let HistoricalRecord::NodeEvent(node_record) = record else {
-            continue;
-        };
+        for (offset, record) in history.records_iter().enumerate() {
+            let HistoricalRecord::NodeEvent(node_record) = record else {
+                continue;
+            };
 
-        let new_hash = node_record.snapshot.membership_hash().u64();
-        let old_hash = latest.insert(node_record.id, new_hash);
-        if old_hash == Some(new_hash) {
-            continue;
+            let new_hash = node_record.snapshot.membership_hash().u64();
+            let old_hash = latest.insert(node_record.id, new_hash);
+            if old_hash == Some(new_hash) {
+                continue;
+            }
+
+            let event_time = (start_time + offset as u64) as f64;
+
+            if let Some(old_hash) = old_hash {
+                let count = counts.entry(old_hash).or_insert(0);
+                *count -= 1;
+                series.entry(old_hash).or_default().push((event_time, *count as f64));
+            }
+
+            let count = counts.entry(new_hash).or_insert(0);
+            *count += 1;
+            series.entry(new_hash).or_default().push((event_time, *count as f64));
         }
-
-        let event_time = (start_time + offset as u64) as f64;
-
-        if let Some(old_hash) = old_hash {
-            let count = counts.entry(old_hash).or_insert(0);
-            *count -= 1;
-            series.entry(old_hash).or_default().push((event_time, *count as f64));
-        }
-
-        let count = counts.entry(new_hash).or_insert(0);
-        *count += 1;
-        series.entry(new_hash).or_default().push((event_time, *count as f64));
-    }
+        series
+    });
 
     ui.label("Membership Hash Distribution");
 

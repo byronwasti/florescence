@@ -5,15 +5,6 @@ use serde::{Deserialize, Serialize};
 pub struct Config<C> {
     pub node_count: usize,
     pub seed: u64,
+    pub message_queue_size: usize,
     pub custom: C,
-}
-
-impl<C> Config<C> {
-    pub fn new(node_count: usize, seed: u64, custom: C) -> Config<C> {
-        Config {
-            node_count,
-            seed,
-            custom,
-        }
-    }
 }

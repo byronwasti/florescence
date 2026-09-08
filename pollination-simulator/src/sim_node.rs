@@ -20,7 +20,7 @@ impl<S: Simulee> SimNode<S> {
     ) -> SimNode<S> {
         Self {
             id,
-            mailbox: Mailbox::new(),
+            mailbox: Mailbox::new(config.message_queue_size),
             simulee: Some(S::new(rng, config, id)),
         }
     }
