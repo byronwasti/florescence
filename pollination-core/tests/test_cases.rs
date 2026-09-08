@@ -1,62 +1,24 @@
-use pollination::core::PollinationCore;
+use pollination::core::{PollinationCore, PollinationMessage};
 use tracing::info;
 
 #[test]
 fn test_case_1() {
     tracing_subscriber::fmt().with_test_writer().try_init();
-    let mut n1: PollinationCore<u64> =
-        serde_json::from_str(include_str!("tc1_dump1.json")).expect("Unparseable");
-    let mut n2: PollinationCore<u64> =
-        serde_json::from_str(include_str!("tc1_dump2.json")).expect("Unparseable");
+    let mut n: PollinationCore<u64> =
+        serde_json::from_str(include_str!("tc2_core.json")).expect("Unparseable");
+    let n0 = n.clone();
 
-    info!("------ 0 ------");
-    let m = n1.heartbeat_message();
+    let mut m: PollinationMessage<u64> =
+        serde_json::from_str(include_str!("tc2_msg.json")).expect("Unparseable");
 
-    info!("------ 1 ------");
-    let m = n2.handle_message(m).expect("Some response");
-    info!("{m}");
+    let msg = n.handle_message(m).expect("Message");
 
-    info!("------ 2 ------");
-    let m = n1.handle_message(m).expect("Some response");
-    info!("{m}");
+    info!("n_start: {n0}");
+    info!("n_end: {n}");
+    info!("msg_out: {msg}");
 
-    info!("------ 3 ------");
-    let m = n2.handle_message(m).expect("Some response");
-    info!("{m}");
-
-    info!("------ 4 ------");
-    let m = n1.handle_message(m);
-    info!("{m:?}");
-
-    info!("n1: {n1}");
-    info!("n2: {n2}");
-}
-
-#[test]
-fn test_case_2() {
-    tracing_subscriber::fmt().with_test_writer().try_init();
-    let mut n1: PollinationCore<u64> =
-        serde_json::from_str(include_str!("tc1_dump1.json")).expect("Unparseable");
-    let mut n2: PollinationCore<u64> =
-        serde_json::from_str(include_str!("tc1_dump2.json")).expect("Unparseable");
-
-    info!("------ 0 ------");
-    info!("n1: {n1}");
-    info!("n2: {n2}");
-    let m = n2.heartbeat_message();
-
-    info!("------ 1 ------");
-    let m = n1.handle_message(m).expect("Some response");
-    info!("{m}");
-
-    info!("------ 2 ------");
-    let m = n2.handle_message(m).expect("Some response");
-    info!("{m}");
-
-    info!("------ 3 ------");
-    let m = n1.handle_message(m);
-    info!("{m:?}");
-
-    info!("n1: {n1}");
-    info!("n2: {n2}");
+    let t0 = n0.timestamp();
+    let t = n.timestamp();
+    info!("t - t0 = {}", t.clone().diff(t0));
+    info!("t0 - t1 = {}", t0.clone().diff(t));
 }

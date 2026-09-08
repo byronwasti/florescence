@@ -396,12 +396,12 @@ fn draw_core_info(ui: &mut Ui, node: &PollinationCore<NodeIndex>) {
         }
     });
     let json = serde_json::to_string(node).expect("Unable to serialize core");
-    if ui.button("Copy json to Clipboard").clicked() {
-        ui.copy_text(serde_json::to_string(&json).expect("Unable to serialize"));
-    }
     ui.collapsing("json", |ui| {
         ui.label(format!("{json}"));
     });
+    if ui.button("Copy json to Clipboard").clicked() {
+        ui.copy_text(json);
+    }
 }
 
 type MembershipPlotSeries = HashMap<u64, Vec<(f64, f64)>>;

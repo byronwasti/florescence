@@ -363,6 +363,7 @@ where
             info!("Patch present in message.");
             let mut updated_core = self.core_map.clone();
             let (added, removed) = updated_core.apply(patch); // TODO: Use these
+            let net_added = analyze_added_removed(&added, &removed);
 
             if find_id(&updated_core, self.uuid()).is_some() {
                 if MembershipHash::new(&updated_core) != message.membership_hash {
@@ -371,11 +372,19 @@ where
                     Some(self.handle_skew(message))
                 } else {
                     info!("Clean update; heartbeat");
-                    // Assume clean
-                    // TODO: Are there edge cases? YES!
-                    self.core_map = updated_core;
 
+                    // If we removed more info than added, ignore
+                    /* TODO: Figure out how to do this properly
+                    if !net_added {
+                        return Some(self.handle_skew(message))
+                    }
+                    */
+
+                    // TODO: Are there more edge cases? Yes.
+
+                    self.core_map = updated_core;
                     self.id = find_id(&self.core_map(), self.uuid()).expect("Self to be present");
+                    self.increment();
                     //Some(self.update_message(&message.timestamp))
                     Some(self.heartbeat_message())
                 }
@@ -492,6 +501,59 @@ fn unique_diff_count<A>(map_a: &ItcMap<NodeInfo<A>>, map_b: &ItcMap<NodeInfo<A>>
         .count() as i64;
 
     (diff_a, diff_b)
+}
+
+fn analyze_added_removed<A: std::fmt::Debug>(
+    added: &[(IdTree, &NodeInfo<A>)],
+    removed: &[(IdTree, NodeInfo<A>)],
+) -> bool {
+    for (id, node) in added {
+        debug!("Added: {id} -> {node}");
+    }
+    for (id, node) in removed {
+        debug!("Removed: {id} -> {node}");
+    }
+
+    let entries_added = added
+        .iter()
+        .map(|(_, d)| (d.uuid, d.timestamp))
+        .collect::<HashMap<_, _>>();
+    let entries_removed = added
+        .iter()
+        .map(|(_, d)| (d.uuid, d.timestamp))
+        .collect::<HashMap<_, _>>();
+
+    let added_info: u64 = entries_added
+        .iter()
+        .filter_map(|(uuid, timestamp_added)| {
+            if let Some(timestamp_removed) = entries_removed.get(&uuid) {
+                if timestamp_added > timestamp_removed {
+                    Some(1)
+                } else {
+                    None
+                }
+            } else {
+                Some(1)
+            }
+        })
+        .sum();
+
+    let removed_info: u64 = entries_removed
+        .iter()
+        .filter_map(|(uuid, timestamp_removed)| {
+            if let Some(timestamp_added) = entries_added.get(&uuid) {
+                if timestamp_removed > timestamp_added {
+                    Some(1)
+                } else {
+                    None
+                }
+            } else {
+                Some(1)
+            }
+        })
+        .sum();
+
+    added_info >= removed_info
 }
 
 // PollinationMessage
