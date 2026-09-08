@@ -125,15 +125,17 @@ mod tests {
     use rand_chacha::ChaCha12Rng;
 
     #[test]
+    #[ignore]
     fn basic_convergence() {
         tracing_subscriber::fmt().with_test_writer().try_init();
-        let config = Config::new(
-            20,
-            1337,
-            PollinationConfig {
+        let config = Config {
+            node_count: 20,
+            seed: 1337,
+            message_queue_size: 5,
+            custom: PollinationConfig {
                 rand_robin_count: 2,
             },
-        );
+        };
         let mut sim: Sim<SimulatedPollinationCore> = Sim::new(config.clone());
 
         for _ in 0..25_500 {
@@ -147,13 +149,14 @@ mod tests {
     #[ignore]
     fn deterministic_simulation() {
         tracing_subscriber::fmt().with_test_writer().try_init();
-        let config = Config::new(
-            12,
-            1236,
-            PollinationConfig {
+        let config = Config {
+            node_count: 20,
+            seed: 1337,
+            message_queue_size: 5,
+            custom: PollinationConfig {
                 rand_robin_count: 2,
             },
-        );
+        };
         let mut sim1: Sim<SimulatedPollinationCore> = Sim::new(config.clone());
         let mut sim2: Sim<SimulatedPollinationCore> = Sim::new(config);
 

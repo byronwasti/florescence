@@ -10,10 +10,18 @@ use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PollinationCore<A> {
     id: IdTree,
     core_map: ItcMap<NodeInfo<A>>,
     own_info: NodeInfo<A>,
+}
+
+impl<A> PollinationCore<A> {
+    pub fn membership_hash(&self) -> MembershipHash {
+        // TODO: Efficiency
+        MembershipHash::new(&self.core_map)
+    }
 }
 
 impl<A> PollinationCore<A>
@@ -67,11 +75,6 @@ where
             .map(|(_, n)| n.uuid)
             .collect::<HashSet<_>>();
         unique_count.len()
-    }
-
-    pub fn membership_hash(&self) -> MembershipHash {
-        // TODO: Efficiency
-        MembershipHash::new(&self.core_map)
     }
 
     /// Increment the logical timestamp associated with this nodes data.
@@ -266,7 +269,7 @@ where
     /// Take on a peers core_map; merge them
     // TODO: This name is horrible.
     #[tracing::instrument(skip_all)]
-    fn handle_new_membership(
+    fn handle_membership_response(
         &mut self,
         message: PollinationMessage<A>,
     ) -> Result<Option<PollinationMessage<A>>> {
@@ -344,7 +347,7 @@ where
         }
 
         if message.new_membership.is_response() {
-            match self.handle_new_membership(message.clone()) {
+            match self.handle_membership_response(message.clone()) {
                 Ok(Some(msg)) => return Some(msg),
                 Ok(None) => info!("Nothing to do for handling provided membership"),
                 Err(err) => {
@@ -364,13 +367,14 @@ where
             if find_id(&updated_core, self.uuid()).is_some() {
                 if MembershipHash::new(&updated_core) != message.membership_hash {
                     info!("Membership has mismatch");
-                    // Definitely unclean update; memberhsip hash mismatch
+                    // Definitely unclean update; membership hash mismatch
                     Some(self.handle_skew(message))
                 } else {
                     info!("Clean update; heartbeat");
                     // Assume clean
-                    // TODO: Are there edge cases?
+                    // TODO: Are there edge cases? YES!
                     self.core_map = updated_core;
+
                     self.id = find_id(&self.core_map(), self.uuid()).expect("Self to be present");
                     //Some(self.update_message(&message.timestamp))
                     Some(self.heartbeat_message())
@@ -438,11 +442,12 @@ impl<A: std::fmt::Debug> std::fmt::Display for PollinationCore<A> {
 
         write!(
             f,
-            "{:?}::{} timestamp={}, id={}, map={}",
+            "{:?}::{} timestamp={}, id={}, membership_hash={:?}, map={}",
             self.own_info.addr,
             self.own_info.uuid,
             self.core_map.timestamp(),
             &self.id,
+            self.membership_hash(),
             map,
         )
     }

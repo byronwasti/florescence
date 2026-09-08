@@ -1,12 +1,13 @@
 #![allow(unused)]
 use crate::widgets::{ForceGraphSettingsWidget, ForceGraphState, ForceGraphWidget};
 use egui::{
-    Color32, Frame, Painter, Pos2, Rect, Scene, ScrollArea, Sense, Shape, Stroke, Ui, Vec2, emath,
-    pos2, vec2,
+    Color32, Frame, Painter, Pos2, Rect, RichText, Scene, ScrollArea, Sense, Shape, Stroke, Ui,
+    Vec2, emath, pos2, vec2,
 };
-use egui_plot::{Legend, Line, Plot, PlotPoints, HoverPosition};
+use egui_plot::{HoverPosition, Legend, Line, Plot, PlotPoints};
 use pollination_simulation::core::{
-    PollinationConfig, PollinationEvent, PollinationMessage, SimulatedPollinationCore, PollinationCore,
+    PollinationConfig, PollinationCore, PollinationEvent, PollinationMessage,
+    SimulatedPollinationCore,
 };
 use pollination_simulator::{Config, Mail, NodeIndex, Sim, SimNode, history::HistoricalRecord};
 use std::{
@@ -178,7 +179,8 @@ impl PollinationViewer {
 
                                 // TODO: Move this into the historical record, this is a silly thing
                                 // to do
-                                let event_time = history.time() - history.records().len() as u64 + offset as u64;
+                                let event_time =
+                                    history.time() - history.records().len() as u64 + offset as u64;
                                 ui.collapsing(
                                     format!(
                                         "{event_time} NodeId={:?} event={:?} {}",
@@ -186,7 +188,7 @@ impl PollinationViewer {
                                     ),
                                     |ui| {
                                         ui.collapsing("Pre Node State", |ui| {
-                                            draw_node_info(ui, record.snapshot.inner());
+                                            draw_core_info(ui, record.snapshot.inner());
                                         });
                                         ui.collapsing("Msg In", |ui| {
                                             self.draw_msg_in(ui, record.msg_in.as_ref());
@@ -218,6 +220,9 @@ impl PollinationViewer {
         };
 
         ui.label(format!("{:?} => {}", &msg.from, &msg.msg));
+        if ui.button("Copy json to Clipboard").clicked() {
+            ui.copy_text(serde_json::to_string(&msg.msg).expect("Unable to serialize"));
+        }
     }
 
     fn draw_msg_out(
@@ -347,7 +352,8 @@ impl<U> Cached<U> {
     }
 
     pub fn get<F>(&mut self, getter: F) -> &U
-    where F: FnOnce() -> U
+    where
+        F: FnOnce() -> U,
     {
         if self.inner.is_none() {
             self.inner = Some(getter());
@@ -367,22 +373,18 @@ fn draw_sim_node_info(ui: &mut Ui, node: &SimNode<SimulatedPollinationCore>) {
 
             ui.collapsing("State", |ui| {
                 let node = node.inner().inner();
-                draw_node_info(ui, &node);
+                draw_core_info(ui, &node);
             });
 
             ui.collapsing("Mailbox", |ui| {
                 for mail in node.mailbox.iter() {
-                    ui.label(format!(
-                            "{} -> {:?}",
-                            mail.from.index(),
-                            mail.msg
-                    ));
+                    ui.label(format!("{} -> {:?}", mail.from.index(), mail.msg));
                 }
             });
         });
 }
 
-fn draw_node_info(ui: &mut Ui, node: &PollinationCore<NodeIndex>) {
+fn draw_core_info(ui: &mut Ui, node: &PollinationCore<NodeIndex>) {
     ui.label(format!("UUID: {}", node.uuid()));
     ui.label(format!("Membership Hash: {:?}", node.membership_hash()));
     ui.label(format!("ItcId: {}", node.id()));
@@ -393,6 +395,13 @@ fn draw_node_info(ui: &mut Ui, node: &PollinationCore<NodeIndex>) {
             ui.label(format!("{id} -> {d:?}"));
         }
     });
+    let json = serde_json::to_string(node).expect("Unable to serialize core");
+    if ui.button("Copy json to Clipboard").clicked() {
+        ui.copy_text(serde_json::to_string(&json).expect("Unable to serialize"));
+    }
+    ui.collapsing("json", |ui| {
+        ui.label(format!("{json}"));
+    });
 }
 
 type MembershipPlotSeries = HashMap<u64, Vec<(f64, f64)>>;
@@ -401,7 +410,11 @@ type MembershipPlotSeries = HashMap<u64, Vec<(f64, f64)>>;
 /// truncated) history, how many nodes currently carry that hash, over event time.
 /// A converging simulation shows its hash groups merging into a single line that
 /// climbs to the total node count.
-fn draw_membership_hash_distribution_plot(ui: &mut Ui, cache: &mut Cached<MembershipPlotSeries>, sim: &Sim<SimulatedPollinationCore>) {
+fn draw_membership_hash_distribution_plot(
+    ui: &mut Ui,
+    cache: &mut Cached<MembershipPlotSeries>,
+    sim: &Sim<SimulatedPollinationCore>,
+) {
     let node_count = sim.nodes().count();
     let series = cache.get(|| {
         let history = sim.history();
@@ -431,12 +444,18 @@ fn draw_membership_hash_distribution_plot(ui: &mut Ui, cache: &mut Cached<Member
             if let Some(old_hash) = old_hash {
                 let count = counts.entry(old_hash).or_insert(0);
                 *count -= 1;
-                series.entry(old_hash).or_default().push((event_time, *count as f64));
+                series
+                    .entry(old_hash)
+                    .or_default()
+                    .push((event_time, *count as f64));
             }
 
             let count = counts.entry(new_hash).or_insert(0);
             *count += 1;
-            series.entry(new_hash).or_default().push((event_time, *count as f64));
+            series
+                .entry(new_hash)
+                .or_default()
+                .push((event_time, *count as f64));
         }
         series
     });
@@ -460,9 +479,11 @@ fn draw_membership_hash_distribution_plot(ui: &mut Ui, cache: &mut Cached<Member
         .x_axis_label("Event Time")
         .y_axis_label("Node Count")
         .label_formatter(|pos| match pos {
-            HoverPosition::NearDataPoint { plot_name, position, .. } if !plot_name.is_empty() => {
-                Some(format!("{}: {}", plot_name, position.y))
-            }
+            HoverPosition::NearDataPoint {
+                plot_name,
+                position,
+                ..
+            } if !plot_name.is_empty() => Some(format!("{}: {}", plot_name, position.y)),
             _ => None,
         })
         .show(ui, |plot_ui| {
