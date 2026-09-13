@@ -127,14 +127,27 @@ impl<S: Simulee> Sim<S> {
         F: Fn(&S) -> U,
         U: PartialEq,
     {
+        self.has_converged_inner(compare_key_fn).unwrap_or(false)
+    }
+
+    fn has_converged_inner<F, U>(&self, compare_key_fn: F) -> Option<bool>
+    where
+        F: Fn(&S) -> U,
+        U: PartialEq,
+    {
         let mut nodes = self.nodes();
         let Some(first) = nodes.next() else {
-            return true;
+            return Some(true);
         };
 
-        let first = compare_key_fn(first.inner());
+        let first = compare_key_fn(first.inner()?);
+        for n in nodes {
+            if compare_key_fn(n.inner()?) != first {
+                return Some(false);
+            }
+        }
 
-        nodes.all(|n| compare_key_fn(n.inner()) == first)
+        Some(true)
     }
 }
 

@@ -25,8 +25,8 @@ impl<S: Simulee> SimNode<S> {
         }
     }
 
-    pub fn inner(&self) -> &S {
-        self.simulee.as_ref().expect("Expected simulee")
+    pub fn inner(&self) -> Option<&S> {
+        self.simulee.as_ref()
     }
 
     pub fn push_mailbox(&mut self, from: NodeIndex, message: S::Message) {

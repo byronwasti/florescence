@@ -84,13 +84,19 @@ where
         assert_eq!(removals.len(), 1);
     }
 
+    fn set_own_info(&mut self) {
+        let removals = self.insert(self.id.clone(), self.own_info().clone());
+        assert_eq!(removals.len(), 1);
+    }
+
     // Insert value at IdTree location, returning removed IdTrees and their values.
     fn insert(&mut self, id: IdTree, value: NodeInfo<A>) -> Vec<(IdTree, NodeInfo<A>)> {
         self.core_map.insert(id, value)
     }
 
-    #[tracing::instrument(level = "info", skip(self))]
+    #[tracing::instrument(skip_all)]
     pub fn heartbeat_message(&self) -> PollinationMessage<A> {
+        info!("Heartbeat message");
         let membership_hash = MembershipHash::new(&self.core_map);
         let unique_count = self.unique_count();
 
@@ -101,19 +107,23 @@ where
             membership_hash,
             unique_count,
             patch: None,
+            full_patch: false,
             new_membership: NewMembership::None,
         }
     }
 
+    #[tracing::instrument(skip_all)]
     fn full_update_message(&self) -> PollinationMessage<A> {
-        info!("Full update");
-        self.update_message(&EventTree::new())
+        info!("Full update message");
+        let mut msg = self.update_message(&EventTree::new());
+        msg.full_patch = true;
+        msg
     }
 
     // NOTE: Degrades to be heartbeat_message() if the timestamps are equal
     #[tracing::instrument(skip_all, fields(timestamp))]
     fn update_message(&self, timestamp: &EventTree) -> PollinationMessage<A> {
-        info!("Update");
+        info!("Update message");
         let mut msg = self.heartbeat_message();
         msg.patch = self.core_map.diff(timestamp);
         msg
@@ -121,7 +131,7 @@ where
 
     #[tracing::instrument(skip(self))]
     fn request_membership_message(&self) -> PollinationMessage<A> {
-        info!("Request membership");
+        info!("Request membership message");
         // Include all of our peers to be included as well
         let mut msg = self.full_update_message();
         msg.new_membership = NewMembership::Request;
@@ -130,7 +140,7 @@ where
 
     #[tracing::instrument(skip(self))]
     fn response_membership_message(&self) -> PollinationMessage<A> {
-        info!("Response membership");
+        info!("Response membership message");
         let mut msg = self.full_update_message();
         msg.new_membership = NewMembership::Response;
         msg
@@ -164,164 +174,6 @@ where
         }
     }
 
-    #[tracing::instrument(skip_all)]
-    fn handle_skew(&self, message: PollinationMessage<A>) -> PollinationMessage<A> {
-        if message.patch.is_some() {
-            self.handle_skew_patch(message)
-        } else {
-            self.handle_skew_no_patch(message)
-        }
-    }
-
-    #[tracing::instrument(skip_all)]
-    fn handle_skew_patch(&self, message: PollinationMessage<A>) -> PollinationMessage<A> {
-        // TODO: Safe expect but not great
-        let peer_map: ItcMap<NodeInfo<A>> = ItcMap::from_patch(message.patch.expect("Patch"));
-
-        let (a, b) = unique_diff_count(&self.core_map, &peer_map);
-        //match message.unique_count.cmp(&self.unique_count()) {
-        match a.cmp(&b) {
-            Ordering::Greater => {
-                info!("Self > Peer");
-                self.full_update_message()
-            }
-            Ordering::Less => {
-                info!("Self < Peer");
-                self.request_membership_message()
-            }
-            Ordering::Equal => {
-                info!("Self = Peer");
-                if message.membership_hash > self.membership_hash() {
-                    info!("M(Self) > M(Peer)");
-                    self.request_membership_message()
-                } else {
-                    info!("M(Self) < M(Peer)");
-                    self.full_update_message()
-                }
-            }
-        }
-    }
-
-    #[tracing::instrument(skip_all)]
-    fn handle_skew_no_patch(&self, message: PollinationMessage<A>) -> PollinationMessage<A> {
-        match self.unique_count().cmp(&message.unique_count) {
-            Ordering::Greater => {
-                info!("Self > Peer");
-                self.full_update_message()
-            }
-            Ordering::Less => {
-                info!("Self < Peer");
-                self.request_membership_message()
-            }
-            Ordering::Equal => {
-                info!("Self = Peer");
-                // No need to check anything here, we just need to share more info
-                self.full_update_message()
-            }
-        }
-    }
-
-    #[tracing::instrument(skip_all)]
-    fn handle_membership_request(
-        &mut self,
-        message: PollinationMessage<A>,
-    ) -> Result<Option<PollinationMessage<A>>> {
-        if self.membership_hash() == message.membership_hash {
-            info!("Membership_hash mismatch; bailing");
-            return Ok(None);
-        }
-
-        // A PollinationMessage with NewMembership::Request can be assumed to have the full ItcMap
-        // as part of the request.
-        // TODO: Proper error handling
-        let peer_map: ItcMap<NodeInfo<A>> =
-            ItcMap::from_patch(message.patch.ok_or(PollinationError::NoPatch)?);
-
-        let (a, b) = unique_diff_count(&self.core_map, &peer_map);
-        if a < b {
-            // NOTE: I think this can actually end up in a live-lock situation, but probably
-            // too rare to be a problem.
-            info!("New group has more unique; bailing");
-            return Ok(None);
-        }
-
-        let mut peers = vec![];
-        for (_, node) in peer_map.iter() {
-            // TODO: Horribly inefficient; does it matter?
-            if find_id(&self.core_map, node.uuid).is_some() {
-                continue;
-            }
-
-            peers.push(node.clone());
-        }
-
-        if peers.is_empty() {
-            info!("No peers to add");
-            Ok(None)
-        } else {
-            info!("Peers to add; sending provide member message");
-            self.add_peers(peers);
-            Ok(Some(self.response_membership_message()))
-        }
-    }
-
-    /// Handling a new core_map which has ourselves included.
-    /// Take on a peers core_map; merge them
-    // TODO: This name is horrible.
-    #[tracing::instrument(skip_all)]
-    fn handle_membership_response(
-        &mut self,
-        message: PollinationMessage<A>,
-    ) -> Result<Option<PollinationMessage<A>>> {
-        if self.membership_hash() == message.membership_hash {
-            info!("Membership hash equality; bailing");
-            return Ok(None);
-        }
-
-        let peer_map: ItcMap<NodeInfo<A>> =
-            ItcMap::from_patch(message.patch.ok_or(PollinationError::NoPatch)?);
-
-        let (a, b) = unique_diff_count(&self.core_map, &peer_map);
-        if a > b {
-            info!("More unique us; bailing");
-            return Ok(None);
-        }
-
-        if let Some(new_id) = find_id(&peer_map, self.uuid()) {
-            // Swap identities to the new map
-            let mut new_self = PollinationCore {
-                id: new_id,
-                core_map: peer_map,
-                own_info: self.own_info.clone(),
-            };
-            mem::swap(self, &mut new_self);
-            let old_self = new_self;
-
-            // Add peers not present in the current ItcMap to the Map
-            let mut non_present = non_present(&old_self.core_map, &self.core_map);
-            let mut new_ids = self.id.clone().fork_many(non_present.len() + 1);
-            let mut new_ids = new_ids.drain(..);
-
-            self.id = new_ids.next().expect("fork_many bug");
-            let removed = self.core_map.insert(self.id.clone(), self.own_info.clone());
-            assert_eq!(removed.len(), 1);
-
-            for non_present in non_present.drain(..) {
-                let id = new_ids.next().expect("fork_many bug");
-                let removed = self.core_map.insert(id, non_present);
-                assert_eq!(removed.len(), 0);
-            }
-
-            self.increment();
-
-            info!("Merged with peers; sending update");
-            return Ok(Some(self.update_message(&message.timestamp)));
-        } else {
-            info!("No self in new map; bailing");
-            return Err(PollinationError::NoSelf);
-        }
-    }
-
     #[tracing::instrument(skip_all,fields(id=?self.addr()))]
     pub fn handle_message(
         &mut self,
@@ -334,79 +186,256 @@ where
             &self.id
         );
 
-        if message.new_membership.is_request() {
-            match self.handle_membership_request(message.clone()) {
-                Ok(Some(msg)) => return Some(msg),
-                Ok(None) => info!("Nothing to do for handling requested new membership"),
-                Err(err) => {
-                    error!("{err}");
-                    // TODO: Remove panic
-                    panic!("Bug present in requested membership route")
-                }
-            }
-        }
-
-        if message.new_membership.is_response() {
-            match self.handle_membership_response(message.clone()) {
-                Ok(Some(msg)) => return Some(msg),
-                Ok(None) => info!("Nothing to do for handling provided membership"),
-                Err(err) => {
-                    error!("{err}");
-                    // TODO: Remove panic
-                    panic!("Bug present in provided membership route")
-                }
-            }
-        }
-
-        info!("Handling basic...");
-        if let Some(patch) = message.patch.clone() {
-            info!("Patch present in message.");
-            let mut updated_core = self.core_map.clone();
-            let (added, removed) = updated_core.apply(patch); // TODO: Use these
-            let net_added = analyze_added_removed(&added, &removed);
-
-            if find_id(&updated_core, self.uuid()).is_some() {
-                if MembershipHash::new(&updated_core) != message.membership_hash {
-                    info!("Membership has mismatch");
-                    // Definitely unclean update; membership hash mismatch
-                    Some(self.handle_skew(message))
+        match self.apply_patch(message.clone()) {
+            Ok(()) => {
+                if matches!(
+                    self.timestamp().partial_cmp(&message.timestamp),
+                    Some(Ordering::Greater) | None
+                ) {
+                    Some(self.update_message(&message.timestamp))
                 } else {
-                    info!("Clean update; heartbeat");
-
-                    // If we removed more info than added, ignore
-                    /* TODO: Figure out how to do this properly
-                    if !net_added {
-                        return Some(self.handle_skew(message))
-                    }
-                    */
-
-                    // TODO: Are there more edge cases? Yes.
-
-                    self.core_map = updated_core;
-                    self.id = find_id(&self.core_map(), self.uuid()).expect("Self to be present");
-                    self.increment();
-                    //Some(self.update_message(&message.timestamp))
                     Some(self.heartbeat_message())
                 }
-            } else {
-                info!("Removed self; unclean update");
-                // Definitely unclean update; removed self
-                Some(self.handle_skew(message))
             }
-        } else {
-            info!("No patch");
-            if &message.timestamp == self.timestamp() {
-                if self.membership_hash() == message.membership_hash {
-                    info!("All matches; do nothing");
-                    None
+            Err(ApplyPatchError::NoPatch) => self.handle_no_patch_message(message),
+            Err(err) => {
+                error!("Unable to apply the patch: {err}");
+
+                if message.full_patch {
+                    info!("Full patch, evaluating...");
+                    let new_core = ItcMap::from_patch(message.patch.unwrap().clone());
+
+                    let comparison = compare_itc_maps(&self.core_map, &new_core);
+                    if comparison > 0
+                        || (comparison == 0 && self.membership_hash() < message.membership_hash)
+                    {
+                        info!("Peer membership is better");
+                        if let Some(new_id) = find_id(&new_core, self.uuid()) {
+                            info!("Switching memberships");
+                            assert!(
+                                new_core.get(&new_id).unwrap().timestamp
+                                    <= self.own_info().timestamp
+                            );
+                            self.core_map = new_core;
+                            self.id = new_id;
+                            self.increment();
+                            Some(self.update_message(&message.timestamp))
+                        } else {
+                            Some(self.request_membership_message())
+                        }
+                    } else {
+                        info!("Self membership is better");
+                        if matches!(message.new_membership, NewMembership::Request) {
+                            info!("New membership requested");
+                            let mut peers = vec![];
+                            for (_, node) in new_core.iter() {
+                                // TODO: Horribly inefficient; does it matter?
+                                if find_id(&self.core_map, node.uuid).is_some() {
+                                    continue;
+                                }
+
+                                peers.push(node.clone());
+                            }
+
+                            if peers.is_empty() {
+                                info!("No peers to add");
+                                Some(self.heartbeat_message())
+                            } else {
+                                info!("Peers to add; sending provide member message");
+                                self.add_peers(peers);
+                                Some(self.response_membership_message())
+                            }
+                        } else {
+                            info!("Peer hasn't requested membership");
+                            Some(self.full_update_message())
+                        }
+                    }
                 } else {
-                    info!("Handling skew.");
-                    Some(self.handle_skew(message))
+                    info!("Partial patch");
+                    Some(self.full_update_message())
                 }
-            } else {
-                // TODO: Inefficient; we should be comparing timestamps
-                info!("Sending update");
+            }
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn handle_full_patch_message(
+        &mut self,
+        message: PollinationMessage<A>,
+    ) -> Option<PollinationMessage<A>> {
+        let patch = message.patch.unwrap();
+        todo!()
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn handle_partial_patch_message(
+        &mut self,
+        message: PollinationMessage<A>,
+    ) -> Option<PollinationMessage<A>> {
+        let patch = message.patch.unwrap();
+
+        // First, apply the patch to the core (safely, to a clone)
+        // and gather up as much metadata about the applied patch.
+        let mut patched_core = self.core_map.clone();
+        let (added, removed) = patched_core.apply(patch);
+        let net_added = analyze_added_removed(&added, &removed);
+        let patched_membership_hash = MembershipHash::new(&patched_core);
+        let clean_membership = patched_membership_hash == message.membership_hash;
+        let (is_present, same_id, same_info) = if let Some(id) = find_id(&patched_core, self.uuid())
+        {
+            // Some quick checks and asserts
+            let value = patched_core.get(&id).expect("ID to be present");
+            assert_eq!(value.uuid, self.own_info.uuid);
+            assert!(self.own_info.timestamp >= value.timestamp);
+            (
+                true,
+                id == self.id,
+                self.own_info.timestamp == value.timestamp,
+            )
+        } else {
+            (false, false, false)
+        };
+
+        // Second, try to account for every edge case and fail miserably.
+        match (
+            clean_membership,
+            is_present,
+            same_id,
+            same_info,
+            net_added >= 0,
+        ) {
+            (false, ..) => {
+                info!("Unclean membership; sending full patch");
+                Some(self.full_update_message())
+            }
+            (_, false, ..) => {
+                info!("Not present in applied partial-patch; sending full patch");
+                Some(self.full_update_message())
+            }
+            (true, true, false, ..) => {
+                info!("Differing ID in applied partial-patch; sending full patch");
+                Some(self.full_update_message())
+            }
+            (true, true, true, true, na) => {
+                if na {
+                    info!("Clean update");
+                } else {
+                    // NOTE: Technically it doesn't _lose_ information if we remove 5 dead nodes with a single node update,
+                    // but `net_added` will still be negative in that case. So not totally dirty
+                    info!(
+                        "Dirty update, lost information ({}); still applied it",
+                        net_added
+                    )
+                }
+
+                // Clean update from our perspective, with net new information; so just take it
+                self.core_map = patched_core;
+
+                if matches!(
+                    self.timestamp().partial_cmp(&message.timestamp),
+                    Some(Ordering::Greater) | None
+                ) {
+                    Some(self.update_message(&message.timestamp))
+                } else {
+                    Some(self.heartbeat_message())
+                }
+            }
+            (true, true, true, false, _) => {
+                // A skew. Same ID, but different value means the patch had a higher EventTree but a lower node-Timestamp,
+                // which means this node has swapped trees. Hashes should differ.
+                assert_ne!(self.membership_hash(), patched_membership_hash);
+
+                info!("Skew; reduced timestamp on own_info");
+                Some(self.full_update_message())
+            }
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn handle_no_patch_message(
+        &self,
+        message: PollinationMessage<A>,
+    ) -> Option<PollinationMessage<A>> {
+        match self.timestamp().partial_cmp(&message.timestamp) {
+            Some(Ordering::Greater) | None => {
+                // We have some information peer doesn't have; sync before doing anything
                 Some(self.update_message(&message.timestamp))
+            }
+            Some(Ordering::Less) => {
+                // We need information
+                Some(self.heartbeat_message())
+            }
+            Some(Ordering::Equal) => {
+                if &self.membership_hash() != &message.membership_hash {
+                    // We know there is a skew; send all the information we know.
+                    Some(self.full_update_message())
+                } else {
+                    // We're all synced up; nothing to do
+                    None
+                }
+            }
+        }
+    }
+
+    // Attempt to apply a Patch, and unsuccessful will return relevant issue in application
+    #[tracing::instrument(skip(self))]
+    fn apply_patch(
+        &mut self,
+        message: PollinationMessage<A>,
+    ) -> std::result::Result<(), ApplyPatchError> {
+        let Some(patch) = message.patch else {
+            return Err(ApplyPatchError::NoPatch);
+        };
+
+        // First, apply the patch to the core (safely, to a clone)
+        // and gather up as much metadata about the applied patch.
+        let mut patched_core = self.core_map.clone();
+        let (added, removed) = patched_core.apply(patch);
+        let net_added = analyze_added_removed(&added, &removed);
+        let patched_membership_hash = MembershipHash::new(&patched_core);
+        let clean_membership = patched_membership_hash == message.membership_hash;
+        let (is_present, same_id, same_info) = if let Some(id) = find_id(&patched_core, self.uuid())
+        {
+            // Some quick checks and asserts
+            let value = patched_core.get(&id).expect("ID to be present");
+            assert_eq!(value.uuid, self.own_info.uuid);
+            assert!(self.own_info.timestamp >= value.timestamp);
+            (
+                true,
+                id == self.id,
+                self.own_info.timestamp >= value.timestamp,
+            )
+        } else {
+            (false, false, false)
+        };
+
+        // Second, try to account for every edge case and fail miserably.
+        match (clean_membership, is_present, same_id, same_info) {
+            (false, ..) => Err(ApplyPatchError::UncleanMembership),
+            (_, false, ..) => Err(ApplyPatchError::NotPresentInNew),
+            (true, true, false, ..) => Err(ApplyPatchError::DifferingId),
+            (true, true, true, false) => {
+                // A skew. Same ID, but different value means the patch had a higher EventTree but a lower node-Timestamp,
+                // which means this node has swapped trees. Hashes should differ.
+                assert_ne!(self.membership_hash(), patched_membership_hash);
+                Err(ApplyPatchError::ReducedSelfTimestamp)
+            }
+            (true, true, true, true) => {
+                if net_added >= 0 {
+                    info!("Clean update");
+                } else {
+                    // NOTE: Technically it doesn't _lose_ information if we remove 5 dead nodes with a single node update,
+                    // but `net_added` will still be negative in that case. So not totally dirty
+                    info!(
+                        "Dirty update, lost information ({}); still applied it",
+                        net_added
+                    )
+                }
+
+                // Clean update from our perspective, with net new information; so just take it
+                self.core_map = patched_core;
+
+                Ok(())
             }
         }
     }
@@ -506,7 +535,7 @@ fn unique_diff_count<A>(map_a: &ItcMap<NodeInfo<A>>, map_b: &ItcMap<NodeInfo<A>>
 fn analyze_added_removed<A: std::fmt::Debug>(
     added: &[(IdTree, &NodeInfo<A>)],
     removed: &[(IdTree, NodeInfo<A>)],
-) -> bool {
+) -> i64 {
     for (id, node) in added {
         debug!("Added: {id} -> {node}");
     }
@@ -523,7 +552,7 @@ fn analyze_added_removed<A: std::fmt::Debug>(
         .map(|(_, d)| (d.uuid, d.timestamp))
         .collect::<HashMap<_, _>>();
 
-    let added_info: u64 = entries_added
+    let added_info: i64 = entries_added
         .iter()
         .filter_map(|(uuid, timestamp_added)| {
             if let Some(timestamp_removed) = entries_removed.get(&uuid) {
@@ -538,7 +567,7 @@ fn analyze_added_removed<A: std::fmt::Debug>(
         })
         .sum();
 
-    let removed_info: u64 = entries_removed
+    let removed_info: i64 = entries_removed
         .iter()
         .filter_map(|(uuid, timestamp_removed)| {
             if let Some(timestamp_added) = entries_added.get(&uuid) {
@@ -553,7 +582,47 @@ fn analyze_added_removed<A: std::fmt::Debug>(
         })
         .sum();
 
-    added_info >= removed_info
+    added_info - removed_info
+}
+
+fn compare_itc_maps<A>(a: &ItcMap<NodeInfo<A>>, b: &ItcMap<NodeInfo<A>>) -> i64 {
+    let a_map = itc_map_to_hash_map(&a);
+    let b_map = itc_map_to_hash_map(&b);
+
+    let mut merge = HashMap::new();
+    for (uuid, ts) in a_map.iter() {
+        merge.insert(uuid, (Some(ts), None));
+    }
+    for (uuid, ts) in b_map.iter() {
+        if let Some(v) = merge.get_mut(uuid) {
+            v.1 = Some(ts)
+        } else {
+            merge.insert(uuid, (None, Some(ts)));
+        }
+    }
+
+    merge.values().fold(0, |acc, (a, b)| match (a, b) {
+        (Some(a), None) => acc - 1,
+        (None, Some(b)) => acc + 1,
+        (Some(a), Some(b)) if a > b => acc - 1,
+        (Some(a), Some(b)) if a < b => acc + 1,
+        _ => acc,
+    })
+}
+
+fn itc_map_to_hash_map<A>(itc_map: &ItcMap<NodeInfo<A>>) -> HashMap<Uuid, u64> {
+    let mut map = HashMap::new();
+    itc_map.iter().map(|(_, d)| {
+        if let Some(v) = map.get_mut(&d.uuid) {
+            if d.timestamp > *v {
+                *v = d.timestamp;
+            }
+        } else {
+            map.insert(d.uuid, d.timestamp);
+        }
+    });
+
+    map
 }
 
 // PollinationMessage
@@ -567,19 +636,22 @@ pub struct PollinationMessage<A> {
     unique_count: usize,
     patch: Option<Patch<NodeInfo<A>>>,
     new_membership: NewMembership,
+    // TODO: Derive from Patch
+    full_patch: bool,
 }
 
 impl<A: std::fmt::Debug> std::fmt::Display for PollinationMessage<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         write!(
             f,
-            "PollinationMessage {{ uuid={0} id={1} timestamp={2} membership_hash={3} unique_count={4} new_membership={5:?} patch={6} }}",
+            "PollinationMessage {{ uuid={} id={} timestamp={} membership_hash={} unique_count={} new_membership={:?} full={} patch={} }}",
             self.uuid,
             self.id,
             self.timestamp,
             self.membership_hash.0,
             self.unique_count,
             self.new_membership,
+            self.full_patch,
             if let Some(patch) = &self.patch {
                 format!("{patch}")
             } else {
@@ -622,6 +694,24 @@ pub enum PollinationError {
 }
 
 pub type Result<T> = std::result::Result<T, PollinationError>;
+
+#[derive(Debug, Error)]
+pub enum ApplyPatchError {
+    #[error("Incorrect membership_hash values")]
+    UncleanMembership,
+
+    #[error("Self not present")]
+    NotPresentInNew,
+
+    #[error("Self has differing ID")]
+    DifferingId,
+
+    #[error("Self timestamp is changed")]
+    ReducedSelfTimestamp,
+
+    #[error("No patch present in the message")]
+    NoPatch,
+}
 
 // NodeInfo
 

@@ -3600,9 +3600,9 @@ dependencies = [
 
 [[package]]
 name = "treeclocks"
-version = "0.7.2"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30662d69d70a05a8b86a3fafead44de9153b162004d3356e3ebf2d384b068cda"
+checksum = "82986fd033a49122b71c74e168cb132b05cba2d8d72e098bccde98ea74a477c0"
 dependencies = [
  "serde",
  "thiserror 2.0.20",
