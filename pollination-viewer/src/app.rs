@@ -90,7 +90,7 @@ impl eframe::App for PollinationViewer {
         }
 
         if self.e.run_to_convergence && !has_converged(&self.e.sim) {
-            self.run_steps_by_count();
+            self.run_steps_by_count_until_convergence();
             ctx.request_repaint();
         } else {
             self.e.run_to_convergence = false;
@@ -129,6 +129,17 @@ impl PollinationViewer {
     fn run_steps_by_count(&mut self) {
         for _ in 0..self.d.step_count {
             self.e.sim.step();
+        }
+        self.e.plot_cache.invalidate();
+    }
+
+    fn run_steps_by_count_until_convergence(&mut self) {
+        for _ in 0..self.d.step_count {
+            self.e.sim.step();
+
+            if has_converged(&self.e.sim) {
+                break;
+            }
         }
         self.e.plot_cache.invalidate();
     }
