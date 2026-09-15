@@ -11,9 +11,11 @@ fn test_case_1() {
     let mut m: PollinationMessage<u64> =
         serde_json::from_str(include_str!("tc2_msg.json")).expect("Unparseable");
 
+    info!("n_start: {n0}");
+    info!("m_in: {m}");
+
     let msg = n.handle_message(m).expect("Message");
 
-    info!("n_start: {n0}");
     info!("n_end: {n}");
     info!("msg_out: {msg}");
 

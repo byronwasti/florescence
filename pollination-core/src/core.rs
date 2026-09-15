@@ -285,7 +285,7 @@ where
     }
 
     // Attempt to apply a Patch, and unsuccessful will return relevant issue in application
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip_all)]
     fn apply_patch(
         &mut self,
         message: PollinationMessage<A>,
@@ -444,10 +444,10 @@ fn analyze_added_removed<A: std::fmt::Debug>(
     removed: &[(IdTree, NodeInfo<A>)],
 ) -> i64 {
     for (id, node) in added {
-        debug!("Added: {id} -> {node}");
+        info!("Added: {id} -> {node}");
     }
     for (id, node) in removed {
-        debug!("Removed: {id} -> {node}");
+        info!("Removed: {id} -> {node}");
     }
 
     let entries_added = added
