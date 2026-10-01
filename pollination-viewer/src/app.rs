@@ -5,9 +5,10 @@ use egui::{
     Vec2, emath, pos2, vec2,
 };
 use egui_plot::{HoverPosition, Legend, Line, Plot, PlotPoints};
-use pollination_simulation::core::{
+use pollination_simulation::{treeclocks::ItcMap, core::{
     PollinationConfig, PollinationCore, PollinationEvent, PollinationMessage,
-    SimulatedPollinationCore,
+    SimulatedPollinationCore, NodeInfo,
+}
 };
 use pollination_simulator::{Config, Mail, NodeIndex, Sim, SimNode, history::HistoricalRecord};
 use std::{
@@ -171,7 +172,7 @@ impl PollinationViewer {
             }
             ScrollArea::vertical()
                 .stick_to_bottom(true)
-                //.auto_shrink(true)
+                .auto_shrink(false)
                 .show(ui, |ui| {
                     let history = self.e.sim.history();
                     ui.label(format!("Event time {}", history.time()));
@@ -202,11 +203,12 @@ impl PollinationViewer {
                                             draw_core_info(ui, record.snapshot.inner());
                                         });
                                         ui.collapsing("Msg In", |ui| {
-                                            self.draw_msg_in(ui, record.msg_in.as_ref());
+                                            draw_mail(ui, record.msg_in.as_ref());
                                         });
                                         ui.collapsing("Msgs Out", |ui| {
-                                            for msg in record.msgs_out.iter() {
-                                                self.draw_msg_out(ui, msg);
+                                            for (node_idx, msg) in record.msgs_out.iter() {
+                                                ui.label(format!("For {:?}", node_idx));
+                                                draw_msg(ui, msg);
                                             }
                                         });
                                     },
@@ -222,26 +224,6 @@ impl PollinationViewer {
                     }
                 })
         });
-    }
-
-    fn draw_msg_in(&self, ui: &mut egui::Ui, msg: Option<&Mail<PollinationMessage<NodeIndex>>>) {
-        let Some(msg) = msg else {
-            ui.label("None");
-            return;
-        };
-
-        ui.label(format!("{:?} => {}", &msg.from, &msg.msg));
-        if ui.button("Copy json to Clipboard").clicked() {
-            ui.copy_text(serde_json::to_string(&msg.msg).expect("Unable to serialize"));
-        }
-    }
-
-    fn draw_msg_out(
-        &self,
-        ui: &mut egui::Ui,
-        (to, msg): &(NodeIndex, PollinationMessage<NodeIndex>),
-    ) {
-        ui.label(format!("{:?} => {}", to, &msg));
     }
 
     fn draw_controls(&mut self, ui: &egui::Ui, _frame: &mut eframe::Frame) {
@@ -403,22 +385,64 @@ fn draw_sim_node_info(ui: &mut Ui, node: &SimNode<SimulatedPollinationCore>) {
 fn draw_core_info(ui: &mut Ui, node: &PollinationCore<NodeIndex>) {
     ui.label(format!("UUID: {}", node.uuid()));
     ui.label(format!("Membership Hash: {:?}", node.membership_hash()));
-    ui.label(format!("ItcId: {}", node.id()));
+    ui.label(format!("IdTree: {}", node.id()));
     ui.label(format!("Timestamp: {}", node.timestamp()));
     ui.label(format!("Own Info: {:?}", node.own_info()));
-    ui.collapsing(format!("Map ({})", node.core_map().len()), |ui| {
-        for (id, d) in node.core_map().iter() {
-            ui.label(format!("{id} -> {d:?}"));
-        }
-    });
+    draw_node_mapping(ui, node.core_map());
     let json = serde_json::to_string(node).expect("Unable to serialize core");
     ui.collapsing("json", |ui| {
         ui.label(format!("{json}"));
     });
-    if ui.button("Copy json to Clipboard").clicked() {
+    if ui.button("Copy node json to Clipboard").clicked() {
         ui.copy_text(json);
     }
 }
+
+fn draw_node_mapping(ui: &mut Ui, core_map: &ItcMap<NodeInfo<NodeIndex>>) {
+    ui.collapsing(format!("Map ({})", core_map.len()), |ui| {
+        for (id, d) in core_map.iter() {
+            ui.label(format!("{id} -> {d:?}"));
+        }
+    });
+    let json = serde_json::to_string(&core_map).expect("Unable to serialize mapping");
+    if ui.button("Copy core_map json to Clipboard").clicked() {
+        ui.copy_text(json);
+    };
+}
+
+fn draw_mail(ui: &mut egui::Ui, msg: Option<&Mail<PollinationMessage<NodeIndex>>>) {
+    let Some(msg) = msg else {
+        ui.label("None");
+        return;
+    };
+
+    ui.label(format!("From: {:?}", &msg.from));
+    draw_msg(ui, &msg.msg);
+
+    ui.collapsing("struct", |ui| {
+        ui.label(format!("{:?} => {}", &msg.from, &msg.msg));
+    });
+}
+
+fn draw_msg(ui: &mut egui::Ui, msg: &PollinationMessage<NodeIndex>) {
+    ui.label(format!("Uuid: {}", &msg.uuid));
+    ui.label(format!("IdTree: {}", &msg.id));
+    ui.label(format!("Timestamp: {}", &msg.timestamp));
+    ui.label(format!("Membership Hash: {:?}", &msg.membership_hash));
+    ui.label(format!("Unique Count: {}", &msg.unique_count));
+    ui.label(format!("new_membership: {:?}", &msg.new_membership));
+    ui.label(format!("full_patch: {}", &msg.full_patch));
+
+    if let Some(patch) = &msg.patch {
+        let map = ItcMap::from_patch(patch.clone());
+        draw_node_mapping(ui, &map);
+    }
+
+    if ui.button("Copy msg json to Clipboard").clicked() {
+        ui.copy_text(serde_json::to_string(&msg).expect("Unable to serialize"));
+    }
+}
+
 
 type MembershipPlotSeries = HashMap<u64, Vec<(f64, f64)>>;
 
@@ -487,7 +511,7 @@ fn draw_membership_hash_distribution_plot(
     hashes.sort_unstable();
 
     Plot::new("membership_hash_distribution")
-        .height(200.0)
+        //.height(200.0)
         //.legend(Legend::default())
         .include_y(0.0)
         .include_y(node_count as f64)

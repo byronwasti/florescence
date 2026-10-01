@@ -536,15 +536,15 @@ fn itc_map_to_hash_map<A>(itc_map: &ItcMap<NodeInfo<A>>) -> HashMap<Uuid, u64> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PollinationMessage<A> {
-    uuid: Uuid,
-    id: IdTree,
-    timestamp: EventTree,
-    membership_hash: MembershipHash,
-    unique_count: usize,
-    patch: Option<Patch<NodeInfo<A>>>,
-    new_membership: NewMembership,
+    pub uuid: Uuid,
+    pub id: IdTree,
+    pub timestamp: EventTree,
+    pub membership_hash: MembershipHash,
+    pub unique_count: usize,
+    pub patch: Option<Patch<NodeInfo<A>>>,
+    pub new_membership: NewMembership,
     // TODO: Derive from Patch
-    full_patch: bool,
+    pub full_patch: bool,
 }
 
 impl<A: std::fmt::Debug> std::fmt::Display for PollinationMessage<A> {
@@ -569,7 +569,7 @@ impl<A: std::fmt::Debug> std::fmt::Display for PollinationMessage<A> {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
-enum NewMembership {
+pub enum NewMembership {
     None,
     Request,
     Response,
