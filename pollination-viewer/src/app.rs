@@ -131,6 +131,7 @@ impl PollinationViewer {
         for _ in 0..self.d.step_count {
             self.e.sim.step();
         }
+        self.e.force_graph_state.run_force_simulation();
         self.e.plot_cache.invalidate();
     }
 
@@ -142,6 +143,7 @@ impl PollinationViewer {
                 break;
             }
         }
+        self.e.force_graph_state.run_force_simulation();
         self.e.plot_cache.invalidate();
     }
 

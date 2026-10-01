@@ -114,9 +114,11 @@ impl ForceGraph {
     }
 
     pub fn run_force_simulation(&mut self, config: &super::ForceGraphConfig, fixed: &[usize]) {
+        /*
         if !self.state.first && !self.state.interact {
             return;
         }
+        */
 
         let g = &mut self.inner;
         let nodes = g.node_weights().enumerate().map(|(idx, n)| {

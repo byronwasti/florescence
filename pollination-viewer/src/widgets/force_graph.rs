@@ -12,6 +12,7 @@ pub struct ForceGraphState {
     graph: ForceGraph,
     config: ForceGraphConfig,
     open_node_windows: HashSet<NodeIndex>,
+    fixed: Vec<usize>,
 }
 
 impl ForceGraphState {
@@ -20,7 +21,13 @@ impl ForceGraphState {
             graph: ForceGraph::from_graph(graph),
             config: ForceGraphConfig::default(),
             open_node_windows: HashSet::new(),
+            fixed: Vec::new(),
         }
+    }
+
+    pub fn run_force_simulation(&mut self) {
+        self.graph
+            .run_force_simulation(&self.config, &self.fixed);
     }
 }
 
@@ -38,9 +45,7 @@ impl Widget for ForceGraphWidget<'_> {
 
         // TODO: Move simulation to a "logic" step
         let (pos_map, fixed) = self.position_map(ui, &response);
-        self.state
-            .graph
-            .run_force_simulation(&self.state.config, &fixed);
+        self.state.fixed = fixed;
 
         self.draw_graph(ui, &painter, &response, &pos_map);
         self.draw_open_node_windows(ui);
@@ -93,20 +98,18 @@ impl<'a> ForceGraphWidget<'a> {
             let point_response = ui.interact(point_rect, point_id, Sense::drag());
             node.pos += point_response.drag_delta();
 
-            let pos = if point_response.dragged() {
+            if point_response.dragged() {
                 fixed.push(idx);
                 self.state.open_node_windows.insert(NodeIndex::new(idx));
                 interact = true;
-                node.pos
             } else {
                 if point_response.drag_stopped() {
                     interact = true;
                     //ui.ctx().clear_animations();
                 }
-                node.pos
-            };
+            }
 
-            out.push(pos)
+            out.push(node.pos)
         }
 
         self.state.graph.state.interact = interact;
