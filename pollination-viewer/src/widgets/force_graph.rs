@@ -26,8 +26,7 @@ impl ForceGraphState {
     }
 
     pub fn run_force_simulation(&mut self) {
-        self.graph
-            .run_force_simulation(&self.config, &self.fixed);
+        self.graph.run_force_simulation(&self.config, &self.fixed);
     }
 }
 

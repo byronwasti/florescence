@@ -2,7 +2,7 @@ use egui::{Pos2, pos2};
 use fjadra::{Center, Link, ManyBody, Node as FNode, SimulationBuilder};
 use petgraph::{
     dot::Dot,
-    stable_graph::StableGraph as Graph,
+    stable_graph::{NodeIndex, StableGraph as Graph},
     visit::{EdgeRef, IntoEdgeReferences},
 };
 use rand::{Rng, RngExt};
@@ -14,7 +14,7 @@ pub struct Node {
 }
 
 pub struct ForceGraph {
-    inner: Graph<Node, ()>,
+    inner: Graph<Node, i32>,
     pub(crate) state: State,
 }
 
@@ -24,13 +24,13 @@ pub(crate) struct State {
 }
 
 impl ForceGraph {
-    pub fn from_graph<T>(graph: &Graph<T, ()>) -> Self {
+    pub fn from_graph<T, U>(graph: &Graph<T, U>) -> Self {
         let g = graph.map(
             |idx, _| Node {
                 id: idx.index(),
                 pos: pos2(0., 0.),
             },
-            |_, _| (),
+            |_, _| 0,
         );
 
         Self {
@@ -41,7 +41,8 @@ impl ForceGraph {
             },
         }
     }
-    pub fn from_inner(inner: Graph<Node, ()>) -> Self {
+
+    pub fn from_inner(inner: Graph<Node, i32>) -> Self {
         Self {
             inner,
             state: State {
@@ -51,16 +52,20 @@ impl ForceGraph {
         }
     }
 
-    pub fn inner(&self) -> &Graph<Node, ()> {
+    pub fn add_edges(&mut self, edges: &[(NodeIndex, NodeIndex, i32)]) {
+        self.inner.extend_with_edges(edges);
+    }
+
+    pub fn inner(&self) -> &Graph<Node, i32> {
         &self.inner
     }
 
-    pub fn inner_mut(&mut self) -> &mut Graph<Node, ()> {
+    pub fn inner_mut(&mut self) -> &mut Graph<Node, i32> {
         &mut self.inner
     }
 
     pub fn random() -> ForceGraph {
-        let mut g = Graph::<Node, ()>::new();
+        let mut g = Graph::<Node, i32>::new();
 
         let count = 100;
 
@@ -90,7 +95,7 @@ impl ForceGraph {
     }
 
     pub fn k_graph(k: usize) -> ForceGraph {
-        let mut g = Graph::<Node, ()>::new();
+        let mut g = Graph::<Node, i32>::new();
 
         let mut rng = rand::rng();
         for i in 0..k {
@@ -132,11 +137,6 @@ impl ForceGraph {
                 }
             }
         });
-        let edges = g
-            .edge_references()
-            .clone()
-            .into_iter()
-            .map(|e| (e.source().index(), e.target().index()));
 
         let mut sim = SimulationBuilder::default();
 
@@ -145,17 +145,28 @@ impl ForceGraph {
             sim = sim.with_velocity_decay(config.velocity_decay);
         }
 
-        let mut link = Link::new(edges);
-        if config.link_strength_enabled {
-            link = link.strength(config.link_strength);
-        }
-        if config.link_distance_enabled {
-            link = link.distance(config.link_distance);
+        let mut sim = sim.build(nodes);
+
+        let edges = g
+            .edge_references()
+            .clone()
+            .into_iter()
+            .map(|e| (e.source().index(), e.target().index(), *e.weight()));
+
+        // This feels like it could be more efficient
+        for (s, t, w) in edges {
+            let mut link = Link::new([(s, t)]);
+            if config.link_strength_enabled {
+                link = link.strength(w as f64);
+            }
+            if config.link_distance_enabled {
+                link = link.distance(config.link_distance);
+            }
+
+            sim = sim.add_force("link", link);
         }
 
         let mut sim = sim
-            .build(nodes)
-            .add_force("link", link)
             .add_force("charge", ManyBody::new())
             //.add_force("positionx", PositionY::new().strength(0.001))
             //.add_force("positiony", PositionX::new().strength(0.1))

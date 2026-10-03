@@ -5,14 +5,16 @@ use egui::{
     Vec2, emath, pos2, vec2,
 };
 use egui_plot::{HoverPosition, Legend, Line, Plot, PlotPoints};
-use pollination_simulation::{treeclocks::ItcMap, core::{
-    PollinationConfig, PollinationCore, PollinationEvent, PollinationMessage,
-    SimulatedPollinationCore, NodeInfo,
-}
+use pollination_simulation::{
+    core::{
+        NodeInfo, PollinationConfig, PollinationCore, PollinationEvent, PollinationMessage,
+        SimulatedPollinationCore,
+    },
+    treeclocks::ItcMap,
 };
 use pollination_simulator::{Config, Mail, NodeIndex, Sim, SimNode, history::HistoricalRecord};
 use std::{
-    collections::{HashMap, hash_map::DefaultHasher},
+    collections::{HashMap, HashSet, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
 };
 
@@ -60,7 +62,8 @@ struct EphemeralState {
 impl EphemeralState {
     fn new(saved: &DurableState) -> Self {
         let sim = Sim::new(saved.sim_config.clone());
-        let force_graph_state = ForceGraphState::new(sim.graph());
+        let mut force_graph_state = ForceGraphState::new(sim.graph());
+        force_graph_state.run_force_simulation();
         Self {
             sim,
             step: false,
@@ -124,6 +127,7 @@ impl PollinationViewer {
     fn reset(&mut self) {
         let scene = self.e.scene;
         self.e = EphemeralState::new(&self.d);
+        self.e.force_graph_state.run_force_simulation();
         self.e.scene = scene;
     }
 
@@ -131,7 +135,7 @@ impl PollinationViewer {
         for _ in 0..self.d.step_count {
             self.e.sim.step();
         }
-        self.e.force_graph_state.run_force_simulation();
+        //self.e.force_graph_state.run_force_simulation();
         self.e.plot_cache.invalidate();
     }
 
@@ -143,7 +147,7 @@ impl PollinationViewer {
                 break;
             }
         }
-        self.e.force_graph_state.run_force_simulation();
+        //self.e.force_graph_state.run_force_simulation();
         self.e.plot_cache.invalidate();
     }
 
@@ -444,7 +448,6 @@ fn draw_msg(ui: &mut egui::Ui, msg: &PollinationMessage<NodeIndex>) {
         ui.copy_text(serde_json::to_string(&msg).expect("Unable to serialize"));
     }
 }
-
 
 type MembershipPlotSeries = HashMap<u64, Vec<(f64, f64)>>;
 
