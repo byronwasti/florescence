@@ -28,14 +28,18 @@ pub struct PollinationViewer {
 struct DurableState {
     sim_config: Config<PollinationConfig>,
     step_count: usize,
+    jump_to: usize,
     truncate_history: bool,
     truncate_to: usize,
+    filter_to_node: bool,
+    filter_to_node_val: usize,
 }
 
 impl Default for DurableState {
     fn default() -> DurableState {
         Self {
             step_count: 1,
+            jump_to: 0,
             sim_config: Config {
                 node_count: 3,
                 seed: 1234,
@@ -46,6 +50,8 @@ impl Default for DurableState {
             },
             truncate_history: true,
             truncate_to: 1000,
+            filter_to_node: false,
+            filter_to_node_val: 0,
         }
     }
 }
@@ -86,12 +92,7 @@ impl eframe::App for PollinationViewer {
             self.run_steps_by_count();
         }
 
-        if self.d.truncate_history {
-            let history = self.e.sim.history_mut();
-            if history.records().len() >= 2 * self.d.truncate_to {
-                history.truncate(self.d.truncate_to);
-            }
-        }
+        self.truncate_history();
 
         if self.e.run_to_convergence && !has_converged(&self.e.sim) {
             self.run_steps_by_count_until_convergence();
@@ -128,7 +129,23 @@ impl PollinationViewer {
         let scene = self.e.scene;
         self.e = EphemeralState::new(&self.d);
         self.e.force_graph_state.run_force_simulation();
+        for _ in 0..self.d.jump_to + 1 {
+            self.e.sim.step();
+            self.truncate_history();
+        }
+        self.e.plot_cache.invalidate();
         self.e.scene = scene;
+    }
+
+    fn truncate_history(&mut self) {
+        if !self.d.truncate_history {
+            return
+        }
+
+        let history = self.e.sim.history_mut();
+        if history.records().len() >= 2 * self.d.truncate_to {
+            history.truncate(self.d.truncate_to);
+        }
     }
 
     fn run_steps_by_count(&mut self) {
@@ -176,6 +193,15 @@ impl PollinationViewer {
             if self.d.truncate_history {
                 ui.add(egui::Slider::new(&mut self.d.truncate_to, 1..=10000).text("Truncate to"));
             }
+
+            ui.checkbox(&mut self.d.filter_to_node, "Filter to Node");
+            ui.add(
+                egui::Slider::new(
+                    &mut self.d.filter_to_node_val,
+                    0..=self.d.sim_config.node_count,
+                )
+                .text("Node Id"),
+            );
             ScrollArea::vertical()
                 .stick_to_bottom(true)
                 .auto_shrink(false)
@@ -184,7 +210,18 @@ impl PollinationViewer {
                     ui.label(format!("Event time {}", history.time()));
                     ui.label(format!("Wall time {}", history.wall_time()));
 
-                    for (offset, record) in history.records_iter().enumerate() {
+                    for (offset, record) in history
+                        .records_iter()
+                        .enumerate()
+                        .filter(|(_, rec)| {
+                            if self.d.filter_to_node && let Some(id) = rec.node_id() {
+                                // TODO: Safer convert
+                                id == NodeIndex::from(self.d.filter_to_node_val as u32)
+                            } else {
+                                true
+                            }
+                        })
+                    {
                         match record {
                             HistoricalRecord::NodeEvent(record) => {
                                 let from_node =
@@ -201,8 +238,8 @@ impl PollinationViewer {
                                     history.time() - history.records().len() as u64 + offset as u64;
                                 ui.collapsing(
                                     format!(
-                                        "{event_time} NodeId={:?} event={:?} {}",
-                                        record.id, record.event, from_node,
+                                        "{event_time} NodeId={:?} event={:?} {} ({:?})",
+                                        record.id, record.event, from_node, record.snapshot.inner().membership_hash()
                                     ),
                                     |ui| {
                                         ui.collapsing("Pre Node State", |ui| {
@@ -247,6 +284,12 @@ impl PollinationViewer {
                     egui::Slider::new(&mut self.d.sim_config.message_queue_size, 0..=100)
                         .text("Message queue size"),
                 );
+                ui.add(
+                    egui::Slider::new(&mut self.d.jump_to, 0..=100000)
+                        .logarithmic(true)
+                        .clamping(egui::SliderClamping::Never)
+                        .text("Jump To"),
+                );
 
                 if ui.button("Reset").clicked() {
                     self.reset();
@@ -254,7 +297,12 @@ impl PollinationViewer {
 
                 ui.separator();
 
-                ui.add(egui::Slider::new(&mut self.d.step_count, 0..=10000).text("Step Count"));
+                ui.add(
+                    egui::Slider::new(&mut self.d.step_count, 0..=1000)
+                        .logarithmic(true)
+                        .clamping(egui::SliderClamping::Never)
+                        .text("Step Count"),
+                );
                 self.e.step = ui.button("Step").clicked();
                 if let Some(panic) = self.e.sim.panic_msg() {
                     ui.label(format!("PANIC {panic}"));
@@ -521,6 +569,7 @@ fn draw_membership_hash_distribution_plot(
         .include_y(0.0)
         .include_y(node_count as f64)
         .show_crosshair(true)
+        .grid_fade(1.0)
         .x_axis_label("Event Time")
         .y_axis_label("Node Count")
         .label_formatter(|pos| match pos {

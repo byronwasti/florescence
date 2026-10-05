@@ -82,6 +82,16 @@ pub enum HistoricalRecord<S: Simulee> {
     NoEvent,
 }
 
+impl<S: Simulee> HistoricalRecord<S> {
+    pub fn node_id(&self) -> Option<NodeIndex> {
+        match self {
+            HistoricalRecord::NodeEvent(rec) => Some(rec.id),
+            HistoricalRecord::Error(id, _) => Some(*id),
+            HistoricalRecord::NoEvent => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct NodeRecord<S: Simulee> {
     pub id: NodeIndex,

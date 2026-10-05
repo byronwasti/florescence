@@ -199,7 +199,7 @@ where
             }
             Err(ApplyPatchError::NoPatch) => self.handle_no_patch_message(message),
             Err(err) => {
-                error!("Unable to apply the patch: {err}");
+                error!("Unable to apply the patch: {err:?}");
 
                 if message.full_patch {
                     info!("Full patch, evaluating...");
@@ -300,7 +300,10 @@ where
         let (added, removed) = patched_core.apply(patch);
         let net_added = analyze_added_removed(&added, &removed);
         let patched_membership_hash = MembershipHash::new(&patched_core);
+
+        // TODO: Fix this check. Sometimes the patch just has older values.
         let clean_membership = patched_membership_hash == message.membership_hash;
+        //|| patched_membership_hash == self.membership_hash();
         let (is_present, same_id, same_info) = if let Some(id) = find_id(&patched_core, self.uuid())
         {
             // Some quick checks and asserts
