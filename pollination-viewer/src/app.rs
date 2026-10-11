@@ -1,8 +1,8 @@
 #![allow(unused)]
 use crate::widgets::{ForceGraphSettingsWidget, ForceGraphState, ForceGraphWidget};
 use egui::{
-    Color32, Frame, Painter, Pos2, Rect, RichText, Scene, ScrollArea, Sense, Shape, Stroke, Ui,
-    Vec2, emath, pos2, vec2,
+    CollapsingHeader, Color32, Frame, Painter, Pos2, Rect, RichText, Scene, ScrollArea, Sense,
+    Shape, Stroke, Ui, Vec2, emath, pos2, vec2,
 };
 use egui_plot::{HoverPosition, Legend, Line, Plot, PlotPoints};
 use pollination_simulation::{
@@ -178,13 +178,14 @@ impl PollinationViewer {
                 // No File->Quit on web pages
                 let is_web = cfg!(target_arch = "wasm32");
                 if !is_web {
-                    ui.menu_button("☰", |ui| {
+                    ui.menu_button("🔧", |ui| {
                         if ui.button("Quit").clicked() {
                             ui.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                         egui::widgets::global_theme_preference_buttons(ui);
                     });
-                    ui.add_space(16.0);
+
+                    ui.separator();
                 }
             });
         });
@@ -288,6 +289,8 @@ impl PollinationViewer {
     fn draw_controls(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::Panel::left("Sim Controls").show(ui, |ui| {
             ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
+                self.draw_scene_stats(ui);
+
                 ui.horizontal(|ui| {
                     ui.label("Seed");
                     ui.add(egui::DragValue::new(&mut self.d.sim_config.seed).speed(1));
@@ -340,6 +343,7 @@ impl PollinationViewer {
 
     fn draw_membership_hash_distribution(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::Panel::bottom("Membership Hash Distribution")
+            .min_size(30.0)
             .resizable(true)
             .show(ui, |ui| {
                 draw_membership_hash_distribution_plot(ui, &mut self.e.plot_cache, &self.e.sim);
@@ -347,13 +351,9 @@ impl PollinationViewer {
     }
 
     fn draw_scene(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let frame = egui::containers::Frame::new()
-            .inner_margin(egui::Margin::ZERO)
-            .outer_margin(egui::Margin::ZERO);
+        let frame = egui::containers::Frame::central_panel(ui.style());
 
         egui::CentralPanel::default().frame(frame).show(ui, |ui| {
-            self.draw_scene_stats(ui);
-
             let mut rect = self.e.scene;
             Scene::new()
                 .max_inner_size([350.0, 1000.0])
@@ -388,10 +388,16 @@ impl PollinationViewer {
     }
 
     fn draw_scene_stats(&self, ui: &mut Ui) {
-        ui.label(format!("Seconds since start: {:#?}", &ui.input(|i| i.time)));
-        ui.label(format!("Rect: {:#?}", &self.e.scene));
-        ui.label(format!("Event Time: {:#?}", &self.e.sim.history.time()));
-        ui.label(format!("Wall Time: {:#?}", &self.e.sim.history.wall_time()));
+        Frame::group(ui.style()).show(ui, |ui| {
+            ui.label(format!(
+                "Seconds since start: {:.3}s",
+                &ui.input(|i| i.time)
+            ));
+            ui.label(format!("Rect: {:#?}", &self.e.scene));
+            ui.label(format!("Event Time: {:#?}", &self.e.sim.history.time()));
+            ui.label(format!("Wall Time: {:#?}", &self.e.sim.history.wall_time()));
+            ui.shrink_width_to_current();
+        });
     }
 }
 
@@ -592,7 +598,7 @@ fn draw_membership_hash_distribution_plot(
     hashes.sort_unstable();
 
     Plot::new("membership_hash_distribution")
-        //.height(200.0)
+        .height(200.0)
         //.legend(Legend::default())
         .include_y(0.0)
         .include_y(node_count as f64)
