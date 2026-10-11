@@ -518,7 +518,6 @@ fn draw_msg(ui: &mut egui::Ui, msg: &PollinationMessage<NodeIndex>) {
     ui.label(format!("Membership Hash: {:?}", &msg.membership_hash));
     ui.label(format!("Unique Count: {}", &msg.unique_count));
     ui.label(format!("new_membership: {:?}", &msg.new_membership));
-    ui.label(format!("outcome_hash: {:?}", &msg.outcome_hash));
     ui.label(format!("full_patch: {}", &msg.full_patch));
 
     if let Some(patch) = &msg.patch {

@@ -2,10 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
+    fmt::Debug,
 };
 use thiserror::Error;
-use tracing::{debug, error, info};
-use treeclocks::{EventTree, IdTree, ItcMap, Patch, itc_map::tree::ItcMapTree};
+use tracing::{debug, error, info, warn};
+use treeclocks::{EventTree, IdTree, ItcMap, Patch, itc_map::ItcMapTree};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -30,7 +31,7 @@ impl<A> PollinationCore<A> {
 
 impl<A> PollinationCore<A>
 where
-    A: Clone + for<'a> Deserialize<'a> + Serialize + std::fmt::Debug,
+    A: Clone + for<'a> Deserialize<'a> + Serialize + Debug + PartialEq,
 {
     pub fn new(uuid: Uuid, addr: A) -> Self {
         let own_info = NodeInfo::new(uuid, addr);
@@ -89,11 +90,6 @@ where
         assert_eq!(removals.len(), 1);
     }
 
-    fn set_own_info(&mut self) {
-        let removals = self.insert(self.id.clone(), self.own_info().clone());
-        assert_eq!(removals.len(), 1);
-    }
-
     // Insert value at IdTree location, returning removed IdTrees and their values.
     fn insert(&mut self, id: IdTree, value: NodeInfo<A>) -> Vec<(IdTree, NodeInfo<A>)> {
         self.core_map.insert(id, value)
@@ -108,11 +104,10 @@ where
             timestamp: self.core_map.timestamp().clone(),
             origin_hash: self.origin_hash(),
             membership_hash: self.membership_hash(),
-            outcome_hash: None,
             unique_count: self.unique_count(),
             patch: None,
             full_patch: false,
-            new_membership: NewMembership::None,
+            new_membership: false,
         }
     }
 
@@ -133,14 +128,11 @@ where
         msg
     }
 
-    #[tracing::instrument(skip_all, fields(timestamp, outcome_hash))]
-    fn check_update_message(
-        &self,
-        timestamp: &EventTree,
-        outcome_hash: MembershipHash,
-    ) -> PollinationMessage<A> {
-        let mut msg = self.update_message(timestamp);
-        msg.outcome_hash = Some(outcome_hash);
+    #[tracing::instrument(skip_all, fields(corrupt_id))]
+    fn corrupt_id_message(&self, corrupt_id: IdTree) -> PollinationMessage<A> {
+        // TODO: This should probably be an update_message
+        let mut msg = self.heartbeat_message();
+        msg.timestamp = msg.timestamp.mask_out(&corrupt_id);
         msg
     }
 
@@ -149,15 +141,7 @@ where
         info!("Request membership message");
         // Include all of our peers to be included as well
         let mut msg = self.full_update_message();
-        msg.new_membership = NewMembership::Request;
-        msg
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn response_membership_message(&self) -> PollinationMessage<A> {
-        info!("Response membership message");
-        let mut msg = self.full_update_message();
-        msg.new_membership = NewMembership::Response;
+        msg.new_membership = true;
         msg
     }
 
@@ -198,91 +182,34 @@ where
         info!("Message from={}, ItcId={}", message.uuid, message.id);
         find_id(&self.core_map, self.uuid()).expect("Self to exist");
 
-        // TODO: This doesn't work due to multi-inclusion
-        /*
-        assert_eq!(
-            &find_id(&self.core_map, self.uuid()).expect("Self to exist"),
-            &self.id
-        );
-        */
+        if message.origin_hash != self.origin_hash() {
+            return self.handle_origin_mismatch_message(message);
+        }
 
-        match self.apply_patch(message.clone()) {
-            Ok(()) => {
-                if matches!(
-                    self.timestamp().partial_cmp(&message.timestamp),
-                    Some(Ordering::Greater) | None
-                ) {
-                    Some(self.update_message(&message.timestamp))
-                } else {
-                    Some(self.heartbeat_message())
-                }
-            }
-            Err(ApplyPatchError::NoPatch) => self.handle_no_patch_message(message),
-            Err(ApplyPatchError::UncleanMembership(hash)) if !message.full_patch => {
-                error!(
-                    "Unable to apply the patch due to unclean membership update; might still be okay its a partial"
-                );
+        let Some(patch) = message.patch else {
+            return self.handle_no_patch_message(message);
+        };
 
-                Some(self.check_update_message(&message.timestamp, hash))
-            }
-            Err(err) => {
-                error!("Unable to apply the patch: {err:?}");
-
-                if message.full_patch {
-                    info!("Full patch, evaluating...");
-                    let new_core = ItcMap::from_patch(message.patch.unwrap().clone());
-
-                    let comparison = compare_itc_maps(&self.core_map, &new_core);
-                    if comparison > 0
-                        || (comparison == 0 && self.membership_hash() < message.membership_hash)
-                    {
-                        info!("Peer membership is better");
-                        if let Some(new_id) = find_id(&new_core, self.uuid()) {
-                            info!("Switching memberships");
-                            assert!(
-                                new_core.get(&new_id).unwrap().timestamp
-                                    <= self.own_info().timestamp
-                            );
-                            self.core_map = new_core;
-                            self.id = new_id;
-                            self.increment();
-                            self.origin_hash = message.origin_hash;
-                            Some(self.update_message(&message.timestamp))
-                        } else {
-                            Some(self.request_membership_message())
-                        }
+        match self.apply_patch_3(patch) {
+            Ok(()) => match self.timestamp().partial_cmp(&message.timestamp) {
+                Some(Ordering::Greater) | None => Some(self.update_message(&message.timestamp)),
+                Some(Ordering::Equal) => {
+                    if self.membership_hash() != message.membership_hash {
+                        Some(self.full_update_message())
                     } else {
-                        info!("Self membership is better");
-                        if matches!(message.new_membership, NewMembership::Request) {
-                            info!("New membership requested");
-                            let mut peers = vec![];
-                            for (_, node) in new_core.iter() {
-                                // TODO: Horribly inefficient; does it matter?
-                                if find_id(&self.core_map, node.uuid).is_some() {
-                                    continue;
-                                }
-
-                                peers.push(node.clone());
-                            }
-
-                            if peers.is_empty() {
-                                info!("No peers to add");
-                                Some(self.heartbeat_message())
-                            } else {
-                                info!("Peers to add; sending provide member message");
-                                self.add_peers(peers);
-                                Some(self.response_membership_message())
-                            }
-                        } else {
-                            info!("Peer hasn't requested membership");
-                            Some(self.full_update_message())
-                        }
+                        None
                     }
-                } else {
-                    info!("Partial patch");
-                    Some(self.full_update_message())
                 }
-            }
+                Some(Ordering::Less) => {
+                    error!(
+                        "Incomplete update. {} != {}",
+                        self.timestamp(),
+                        message.timestamp
+                    );
+                    panic!("Timestamp is less than message timestamp; patch was incomplete");
+                }
+            },
+            Err(corrupt_id) => Some(self.corrupt_id_message(corrupt_id)),
         }
     }
 
@@ -291,10 +218,6 @@ where
         &self,
         message: PollinationMessage<A>,
     ) -> Option<PollinationMessage<A>> {
-        if message.origin_hash != self.origin_hash() {
-            return Some(self.full_update_message());
-        }
-
         match self.timestamp().partial_cmp(&message.timestamp) {
             Some(Ordering::Greater) | None => {
                 // We have some information peer doesn't have; sync before doing anything
@@ -316,92 +239,121 @@ where
         }
     }
 
-    #[tracing::instrument(skip_all)]
-    fn apply_patch_new(
+    fn handle_origin_mismatch_message(
         &mut self,
         message: PollinationMessage<A>,
-    ) -> std::result::Result<(), ApplyPatchError> {
-        let Some(patch) = message.patch else {
-            return Err(ApplyPatchError::NoPatch);
-        };
-
-        let peer_map = ItcMap::from_patch(patch);
-        let peer_map_tree = peer_map.tree();
-        let self_map_tree = self.core_map.tree();
-
-        let _res = compare_trees(&self_map_tree, &peer_map_tree);
-
-        todo!()
+    ) -> Option<PollinationMessage<A>> {
+        match message.unique_count.cmp(&self.unique_count()) {
+            Ordering::Less => {
+                if message.new_membership {
+                    self.handle_request_membership_message(message)
+                } else {
+                    Some(self.heartbeat_message())
+                }
+            }
+            Ordering::Equal => {
+                if message.origin_hash > self.origin_hash() {
+                    self.handle_take_new_origin(message)
+                } else {
+                    if message.new_membership {
+                        self.handle_request_membership_message(message)
+                    } else {
+                        Some(self.heartbeat_message())
+                    }
+                }
+            }
+            Ordering::Greater => self.handle_take_new_origin(message),
+        }
     }
 
-    // Attempt to apply a Patch, and unsuccessful will return relevant issue in application
-    #[tracing::instrument(skip_all)]
-    fn apply_patch(
+    fn handle_request_membership_message(
         &mut self,
         message: PollinationMessage<A>,
-    ) -> std::result::Result<(), ApplyPatchError> {
-        let Some(patch) = message.patch else {
-            return Err(ApplyPatchError::NoPatch);
-        };
+    ) -> Option<PollinationMessage<A>> {
+        assert!(message.full_patch);
+        if self.add_peers_from_patch(message.patch.expect("Patch should be present")) {
+            Some(self.heartbeat_message())
+        } else {
+            Some(self.full_update_message())
+        }
+    }
 
-        if message.origin_hash != self.origin_hash {
-            return Err(ApplyPatchError::OriginMismatch);
+    fn handle_take_new_origin(
+        &mut self,
+        message: PollinationMessage<A>,
+    ) -> Option<PollinationMessage<A>> {
+        if !message.full_patch {
+            Some(self.request_membership_message())
+        } else {
+            let new_core = ItcMap::from_patch(message.patch.expect("Expected patch to be present"));
+            if let Some(new_id) = find_id(&new_core, self.uuid()) {
+                // TODO: Also add any new peers at this point
+
+                self.id = new_id;
+                self.core_map = new_core;
+                self.origin_hash = message.origin_hash;
+                self.increment();
+                Some(self.update_message(&message.timestamp))
+            } else {
+                Some(self.request_membership_message())
+            }
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn apply_patch_3(&mut self, patch: Patch<NodeInfo<A>>) -> std::result::Result<(), IdTree> {
+        let own_map_tree = self.core_map.to_itc_map_tree();
+        let peer_map = ItcMap::from_patch(patch);
+        let peer_map_tree = peer_map.to_itc_map_tree();
+        let mut outcome = apply_patch(&own_map_tree, &peer_map_tree);
+        let corrupt_id = outcome.corrupt_id.take();
+
+        let mut inserts = outcome
+            .insert
+            .drain()
+            .map(|(id, val)| (id, val.clone()))
+            .collect::<Vec<_>>();
+        for (id, val) in inserts.drain(..) {
+            self.core_map.insert_without_event(id, val.clone());
         }
 
-        // First, apply the patch to the core (safely, to a clone)
-        // and gather up as much metadata about the applied patch.
-        let mut patched_core = self.core_map.clone();
-        let (added, removed) = patched_core.apply(patch);
-        let net_added = analyze_added_removed(&added, &removed);
-        let patched_membership_hash = MembershipHash::from_itc_map(&patched_core);
-
-        // TODO: Fix this check. Sometimes the patch just has older values.
-        let clean_membership = patched_membership_hash == message.membership_hash
-            || Some(patched_membership_hash) == message.outcome_hash;
-        //|| patched_membership_hash == self.membership_hash();
-        let (is_present, same_id, same_info) = if let Some(id) = find_id(&patched_core, self.uuid())
-        {
-            // Some quick checks and asserts
-            let value = patched_core.get(&id).expect("ID to be present");
-            assert_eq!(value.uuid, self.own_info.uuid);
-            assert!(self.own_info.timestamp >= value.timestamp);
-            (
-                true,
-                id == self.id,
-                self.own_info.timestamp >= value.timestamp,
-            )
+        if let Some(corrupt_id) = corrupt_id {
+            let new_timestamp = self
+                .timestamp()
+                .clone()
+                .join(peer_map.timestamp().clone().mask_out(&corrupt_id));
+            self.core_map.set_timestamp(new_timestamp);
+            Err(corrupt_id)
         } else {
-            (false, false, false)
-        };
+            let new_timestamp = self.timestamp().clone().join(peer_map.timestamp().clone());
+            self.core_map.set_timestamp(new_timestamp);
+            Ok(())
+        }
+    }
 
-        // Second, try to account for every edge case and fail miserably.
-        match (clean_membership, is_present, same_id, same_info) {
-            (false, ..) => Err(ApplyPatchError::UncleanMembership(patched_membership_hash)),
-            (_, false, ..) => Err(ApplyPatchError::NotPresentInNew),
-            (true, true, false, ..) => Err(ApplyPatchError::DifferingId),
-            (true, true, true, false) => {
-                // A skew. Same ID, but different value means the patch had a higher EventTree but a lower node-Timestamp,
-                // which means this node has swapped trees. Hashes should differ.
-                assert_ne!(self.membership_hash(), patched_membership_hash);
-                Err(ApplyPatchError::ReducedSelfTimestamp)
+    /// Returns whether or not peers were added
+    #[tracing::instrument(skip(self))]
+    fn add_peers_from_patch(&mut self, patch: Patch<NodeInfo<A>>) -> bool {
+        // TODO: Efficiency
+        let peer_map = ItcMap::from_patch(patch);
+
+        let mut peers = vec![];
+        for (_, node) in peer_map.iter() {
+            // TODO: Horribly inefficient; does it matter?
+            if find_id(&self.core_map, node.uuid).is_some() {
+                continue;
             }
-            (true, true, true, true) => {
-                if net_added >= 0 {
-                    info!("Clean update");
-                } else {
-                    // NOTE: Technically it doesn't _lose_ information if we remove 5 dead nodes with a single node update,
-                    // but `net_added` will still be negative in that case. So not totally dirty
-                    info!(
-                        "Dirty update, lost information ({}); still applied it",
-                        net_added
-                    )
-                }
 
-                // Clean update from our perspective, with net new information; so just take it
-                self.core_map = patched_core;
+            peers.push(node.clone());
+        }
 
-                Ok(())
-            }
+        if peers.is_empty() {
+            info!("No peers to add");
+            false
+        } else {
+            info!("Peers to add; sending provide member message");
+            self.add_peers(peers);
+            true
         }
     }
 
@@ -409,9 +361,11 @@ where
     // information to the map.
     #[tracing::instrument(skip(self))]
     fn add_peers(&mut self, mut peers: Vec<NodeInfo<A>>) {
+        info!("Adding peers");
         let mut new_ids = self.id.clone().fork_many(peers.len() + 1);
         self.id = new_ids[0].clone();
-        self.insert(new_ids[0].clone(), self.own_info.clone());
+        self.increment();
+        //self.insert(new_ids[0].clone(), self.own_info.clone());
 
         assert_eq!(new_ids.len(), peers.len() + 1);
 
@@ -463,173 +417,149 @@ fn find_id<A>(map: &ItcMap<NodeInfo<A>>, uuid: Uuid) -> Option<IdTree> {
         .cloned()
 }
 
-fn non_present<A>(map_a: &ItcMap<NodeInfo<A>>, map_b: &ItcMap<NodeInfo<A>>) -> Vec<NodeInfo<A>>
+#[derive(Clone, Debug, PartialEq)]
+struct PatchOutcome<'a, A> {
+    insert: HashMap<IdTree, &'a NodeInfo<A>>,
+    // NOTE: This is a "compound" ID, not an Ideal IDTree
+    corrupt_id: Option<IdTree>,
+}
+
+impl<'a, A> PatchOutcome<'a, A> {
+    fn new(id: IdTree, node_info: &'a NodeInfo<A>) -> Self {
+        let mut insert = HashMap::new();
+        insert.insert(id, node_info);
+        PatchOutcome {
+            insert,
+            ..Default::default()
+        }
+    }
+
+    fn corrupt(id: IdTree) -> Self {
+        PatchOutcome {
+            corrupt_id: Some(id),
+            ..Default::default()
+        }
+    }
+
+    fn merge(mut self, other: PatchOutcome<'a, A>) -> Self {
+        self.insert.extend(other.insert);
+        self.corrupt_id = match (self.corrupt_id, other.corrupt_id) {
+            (None, None) => None,
+            (Some(v0), None) => Some(v0),
+            (None, Some(v1)) => Some(v1),
+            (Some(v0), Some(v1)) => Some(v0.join(v1)),
+        };
+
+        self
+    }
+}
+
+impl<'a, A> Default for PatchOutcome<'a, A> {
+    fn default() -> Self {
+        PatchOutcome {
+            insert: HashMap::new(),
+            corrupt_id: None,
+        }
+    }
+}
+
+fn apply_patch<'a, A>(
+    own_map: &'a ItcMapTree<NodeInfo<A>>,
+    peer_map: &'a ItcMapTree<NodeInfo<A>>,
+) -> PatchOutcome<'a, A>
 where
-    NodeInfo<A>: Clone,
+    A: PartialEq + Debug,
 {
-    let entries_b = map_b.iter().map(|(_, d)| d.uuid).collect::<HashSet<_>>();
-
-    map_a
-        .iter()
-        .filter_map(|(_, d)| {
-            if !entries_b.contains(&d.uuid) {
-                Some(d.to_owned())
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-fn unique_diff_count<A>(map_a: &ItcMap<NodeInfo<A>>, map_b: &ItcMap<NodeInfo<A>>) -> (i64, i64) {
-    let entries_a = map_a.iter().map(|(_, d)| d.uuid).collect::<HashSet<_>>();
-    let entries_b = map_b.iter().map(|(_, d)| d.uuid).collect::<HashSet<_>>();
-
-    let diff_a = map_a
-        .iter()
-        .filter(|(_, d)| !entries_b.contains(&d.uuid))
-        .count() as i64;
-    let diff_b = map_b
-        .iter()
-        .filter(|(_, d)| !entries_a.contains(&d.uuid))
-        .count() as i64;
-
-    (diff_a, diff_b)
-}
-
-fn analyze_added_removed<A: std::fmt::Debug>(
-    added: &[(IdTree, &NodeInfo<A>)],
-    removed: &[(IdTree, NodeInfo<A>)],
-) -> i64 {
-    for (id, node) in added {
-        info!("Added: {id} -> {node}");
-    }
-    for (id, node) in removed {
-        info!("Removed: {id} -> {node}");
-    }
-
-    let entries_added = added
-        .iter()
-        .map(|(_, d)| (d.uuid, d.timestamp))
-        .collect::<HashMap<_, _>>();
-    let entries_removed = added
-        .iter()
-        .map(|(_, d)| (d.uuid, d.timestamp))
-        .collect::<HashMap<_, _>>();
-
-    let added_info: i64 = entries_added
-        .iter()
-        .filter_map(|(uuid, timestamp_added)| {
-            if let Some(timestamp_removed) = entries_removed.get(&uuid) {
-                if timestamp_added > timestamp_removed {
-                    Some(1)
-                } else {
-                    None
-                }
-            } else {
-                Some(1)
-            }
-        })
-        .sum();
-
-    let removed_info: i64 = entries_removed
-        .iter()
-        .filter_map(|(uuid, timestamp_removed)| {
-            if let Some(timestamp_added) = entries_added.get(&uuid) {
-                if timestamp_removed > timestamp_added {
-                    Some(1)
-                } else {
-                    None
-                }
-            } else {
-                Some(1)
-            }
-        })
-        .sum();
-
-    added_info - removed_info
-}
-
-fn compare_itc_maps<A>(a: &ItcMap<NodeInfo<A>>, b: &ItcMap<NodeInfo<A>>) -> i64 {
-    let a_map = itc_map_to_hash_map(&a);
-    let b_map = itc_map_to_hash_map(&b);
-
-    let mut merge = HashMap::new();
-    for (uuid, ts) in a_map.iter() {
-        merge.insert(uuid, (Some(ts), None));
-    }
-    for (uuid, ts) in b_map.iter() {
-        if let Some(v) = merge.get_mut(uuid) {
-            v.1 = Some(ts)
-        } else {
-            merge.insert(uuid, (None, Some(ts)));
-        }
-    }
-
-    merge.values().fold(0, |acc, (a, b)| match (a, b) {
-        (Some(_a), None) => acc - 1,
-        (None, Some(_b)) => acc + 1,
-        (Some(a), Some(b)) if a > b => acc - 1,
-        (Some(a), Some(b)) if a < b => acc + 1,
-        _ => acc,
-    })
-}
-
-fn itc_map_to_hash_map<A>(itc_map: &ItcMap<NodeInfo<A>>) -> HashMap<Uuid, u64> {
-    let mut map = HashMap::new();
-    itc_map.iter().map(|(_, d)| {
-        if let Some(v) = map.get_mut(&d.uuid) {
-            if d.timestamp > *v {
-                *v = d.timestamp;
-            }
-        } else {
-            map.insert(d.uuid, d.timestamp);
-        }
-    });
-
-    map
-}
-
-fn compare_trees<A>(own_map: &ItcMapTree<A>, peer_map: &ItcMapTree<A>) -> bool {
     use ItcMapTree::*;
+
     match (own_map, peer_map) {
         (Unknown, _) => panic!("Own map contains ItcMapTree::Unknown"),
-        (_own, Unknown) => todo!(),
+        (_, Unknown) => PatchOutcome::default(),
 
         (
             Leaf {
-                id_tree: _id0,
-                timestamp: _ts0,
-                value: _v0,
+                id_tree: id0,
+                timestamp: ts0,
+                value: v0,
             },
             Leaf {
-                id_tree: _id1,
-                timestamp: _ts1,
-                value: _v1,
+                id_tree: id1,
+                timestamp: ts1,
+                value: v1,
             },
         ) => {
-            todo!()
+            info!("{id0} {ts0} {v0:?}  {id1} {ts1} {v1:?}");
+            match ts0.cmp(ts1) {
+                Ordering::Greater => {
+                    info!("Self contains a greater timestamp, ignoring patch");
+                    PatchOutcome::default()
+                }
+                Ordering::Less => PatchOutcome::new((*id1).clone(), v1),
+                Ordering::Equal => {
+                    if v0.uuid != v1.uuid {
+                        // Panicking for now because we don't have removal of peers yet, so this
+                        // should never happen. In the future we just take the greater
+                        warn!(
+                            "UUID skew between equal peers. Indicates a partition event occurred."
+                        );
+                        panic!("TODO: Remove panic");
+                    } else {
+                        assert_eq!(id0, id1);
+                        assert_eq!(v0, v1);
+                        PatchOutcome::default()
+                    }
+                }
+            }
         }
 
-        (a @ Leaf { .. }, SubTree(l, r)) => {
-            let _l = compare_trees(a, l);
-            let _r = compare_trees(a, r);
+        (a @ Leaf { id_tree, .. }, SubTree(l, r)) => {
+            let l = apply_patch(a, l);
+            let r = apply_patch(a, r);
 
-            todo!()
+            let outcome = l.merge(r);
+
+            if outcome.corrupt_id.is_some() {
+                PatchOutcome::corrupt((*id_tree).clone())
+            } else if !outcome.insert.is_empty() {
+                let updated_id_tree = outcome
+                    .insert
+                    .iter()
+                    .fold(IdTree::zero(), |acc, (id, _)| acc.join(id.clone()));
+
+                // Either we have updates for everything, or we don't
+                // TODO: This check doesn't work; we need to keep track of where we're at in the
+                // tree for this to work properly
+                /*
+                if updated_id_tree != **id_tree {
+                    warn!("Corrupt patch at {id_tree}, only updated {updated_id_tree}");
+                    PatchOutcome::corrupt((*id_tree).clone())
+                } else {
+                    outcome
+                }
+                */
+                outcome
+            } else {
+                outcome
+            }
         }
 
-        (SubTree(l, r), b @ Leaf { .. }) => {
-            let _l = compare_trees(l, b);
-            let _r = compare_trees(r, b);
+        (SubTree(l, r), b @ Leaf { id_tree, .. }) => {
+            let l = apply_patch(l, b);
+            let r = apply_patch(r, b);
 
-            todo!()
+            if l != r {
+                // If the Leaf doesn't subsume all our data, then we're corrupt here
+                warn!("Corrupt patch at {id_tree}");
+                PatchOutcome::corrupt((*id_tree).clone())
+            } else {
+                l
+            }
         }
 
         (SubTree(l0, r0), SubTree(l1, r1)) => {
-            let _l = compare_trees(l0, l1);
-            let _r = compare_trees(r0, r1);
-
-            todo!()
+            let l = apply_patch(l0, l1);
+            let r = apply_patch(r0, r1);
+            l.merge(r)
         }
     }
 }
@@ -643,10 +573,9 @@ pub struct PollinationMessage<A> {
     pub timestamp: EventTree,
     pub origin_hash: OriginHash,
     pub membership_hash: MembershipHash,
-    pub outcome_hash: Option<MembershipHash>,
     pub unique_count: usize,
     pub patch: Option<Patch<NodeInfo<A>>>,
-    pub new_membership: NewMembership,
+    pub new_membership: bool,
     // TODO: Derive from Patch
     pub full_patch: bool,
 }
@@ -670,27 +599,6 @@ impl<A: std::fmt::Debug> std::fmt::Display for PollinationMessage<A> {
                 "None".to_string()
             },
         )
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum NewMembership {
-    None,
-    Request,
-    Response,
-}
-
-impl NewMembership {
-    fn is_none(&self) -> bool {
-        matches!(self, NewMembership::None)
-    }
-
-    fn is_request(&self) -> bool {
-        matches!(self, NewMembership::Request)
-    }
-
-    fn is_response(&self) -> bool {
-        matches!(self, NewMembership::Response)
     }
 }
 

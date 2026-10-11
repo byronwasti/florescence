@@ -17,8 +17,8 @@ fn recycle_ids_recurse(own: IdTree, dead_peers: IdTree) -> IdReclaimTree {
         (Zero, SubTree(..)) => IdReclaimTree::Zero,
         (One, SubTree(..)) => {
             // HIT
-            panic!("Logic bug");
             error!("Logic bug");
+            panic!("Logic bug");
             IdReclaimTree::One
         }
         (SubTree(..), One) => {
