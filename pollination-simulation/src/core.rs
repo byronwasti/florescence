@@ -46,7 +46,7 @@ impl Simulee for SimulatedPollinationCore {
         rng: &mut R,
         config: &Config<Self::Config>,
         nodes: &[NodeIndex],
-        wall_time: u64,
+        _wall_time: u64,
         delivery: &mut Option<Delivery<Self::Message>>,
     ) -> Option<(Self::HistoricalEvent, Vec<(NodeIndex, Self::Message)>)> {
         let mut events = vec![];
@@ -84,7 +84,7 @@ impl Simulee for SimulatedPollinationCore {
 
                 Some((PollinationEvent::Heartbeat, msgs))
             }
-            StepOptionHandleMessage => {
+            _StepOptionHandleMessage => {
                 let mail = delivery.as_mut()?.take();
                 let from = mail.from;
                 let msg = mail.msg;

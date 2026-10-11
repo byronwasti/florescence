@@ -2,11 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    mem,
 };
 use thiserror::Error;
 use tracing::{debug, error, info};
-use treeclocks::{EventTree, IdTree, ItcMap, Patch};
+use treeclocks::{EventTree, IdTree, ItcMap, Patch, itc_map::tree::ItcMapTree};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -14,13 +13,18 @@ use uuid::Uuid;
 pub struct PollinationCore<A> {
     id: IdTree,
     core_map: ItcMap<NodeInfo<A>>,
+    origin_hash: OriginHash,
     own_info: NodeInfo<A>,
 }
 
 impl<A> PollinationCore<A> {
     pub fn membership_hash(&self) -> MembershipHash {
         // TODO: Efficiency
-        MembershipHash::new(&self.core_map)
+        MembershipHash::from_itc_map(&self.core_map)
+    }
+
+    pub fn origin_hash(&self) -> OriginHash {
+        self.origin_hash
     }
 }
 
@@ -33,10 +37,11 @@ where
         let id = IdTree::One;
         let mut core_map = ItcMap::new();
         core_map.insert(id.clone(), own_info.clone());
-
+        let origin_hash = OriginHash::from_membership_hash(MembershipHash::from_itc_map(&core_map));
         Self {
             id,
             core_map,
+            origin_hash,
             own_info,
         }
     }
@@ -97,19 +102,27 @@ where
     #[tracing::instrument(skip_all)]
     pub fn heartbeat_message(&self) -> PollinationMessage<A> {
         info!("Heartbeat message");
-        let membership_hash = MembershipHash::new(&self.core_map);
-        let unique_count = self.unique_count();
-
         PollinationMessage {
             uuid: self.own_info.uuid.clone(),
             id: self.id.clone(),
             timestamp: self.core_map.timestamp().clone(),
-            membership_hash,
-            unique_count,
+            origin_hash: self.origin_hash(),
+            membership_hash: self.membership_hash(),
+            outcome_hash: None,
+            unique_count: self.unique_count(),
             patch: None,
             full_patch: false,
             new_membership: NewMembership::None,
         }
+    }
+
+    // NOTE: Degrades to be heartbeat_message() if the timestamps are equal
+    #[tracing::instrument(skip_all, fields(timestamp))]
+    fn update_message(&self, timestamp: &EventTree) -> PollinationMessage<A> {
+        info!("Update message");
+        let mut msg = self.heartbeat_message();
+        msg.patch = self.core_map.diff(timestamp);
+        msg
     }
 
     #[tracing::instrument(skip_all)]
@@ -120,12 +133,14 @@ where
         msg
     }
 
-    // NOTE: Degrades to be heartbeat_message() if the timestamps are equal
-    #[tracing::instrument(skip_all, fields(timestamp))]
-    fn update_message(&self, timestamp: &EventTree) -> PollinationMessage<A> {
-        info!("Update message");
-        let mut msg = self.heartbeat_message();
-        msg.patch = self.core_map.diff(timestamp);
+    #[tracing::instrument(skip_all, fields(timestamp, outcome_hash))]
+    fn check_update_message(
+        &self,
+        timestamp: &EventTree,
+        outcome_hash: MembershipHash,
+    ) -> PollinationMessage<A> {
+        let mut msg = self.update_message(timestamp);
+        msg.outcome_hash = Some(outcome_hash);
         msg
     }
 
@@ -181,10 +196,15 @@ where
     ) -> Option<PollinationMessage<A>> {
         debug!("SELF_DUMP={}", self);
         info!("Message from={}, ItcId={}", message.uuid, message.id);
+        find_id(&self.core_map, self.uuid()).expect("Self to exist");
+
+        // TODO: This doesn't work due to multi-inclusion
+        /*
         assert_eq!(
             &find_id(&self.core_map, self.uuid()).expect("Self to exist"),
             &self.id
         );
+        */
 
         match self.apply_patch(message.clone()) {
             Ok(()) => {
@@ -198,6 +218,13 @@ where
                 }
             }
             Err(ApplyPatchError::NoPatch) => self.handle_no_patch_message(message),
+            Err(ApplyPatchError::UncleanMembership(hash)) if !message.full_patch => {
+                error!(
+                    "Unable to apply the patch due to unclean membership update; might still be okay its a partial"
+                );
+
+                Some(self.check_update_message(&message.timestamp, hash))
+            }
             Err(err) => {
                 error!("Unable to apply the patch: {err:?}");
 
@@ -219,6 +246,7 @@ where
                             self.core_map = new_core;
                             self.id = new_id;
                             self.increment();
+                            self.origin_hash = message.origin_hash;
                             Some(self.update_message(&message.timestamp))
                         } else {
                             Some(self.request_membership_message())
@@ -263,6 +291,10 @@ where
         &self,
         message: PollinationMessage<A>,
     ) -> Option<PollinationMessage<A>> {
+        if message.origin_hash != self.origin_hash() {
+            return Some(self.full_update_message());
+        }
+
         match self.timestamp().partial_cmp(&message.timestamp) {
             Some(Ordering::Greater) | None => {
                 // We have some information peer doesn't have; sync before doing anything
@@ -284,6 +316,24 @@ where
         }
     }
 
+    #[tracing::instrument(skip_all)]
+    fn apply_patch_new(
+        &mut self,
+        message: PollinationMessage<A>,
+    ) -> std::result::Result<(), ApplyPatchError> {
+        let Some(patch) = message.patch else {
+            return Err(ApplyPatchError::NoPatch);
+        };
+
+        let peer_map = ItcMap::from_patch(patch);
+        let peer_map_tree = peer_map.tree();
+        let self_map_tree = self.core_map.tree();
+
+        let _res = compare_trees(&self_map_tree, &peer_map_tree);
+
+        todo!()
+    }
+
     // Attempt to apply a Patch, and unsuccessful will return relevant issue in application
     #[tracing::instrument(skip_all)]
     fn apply_patch(
@@ -294,15 +344,20 @@ where
             return Err(ApplyPatchError::NoPatch);
         };
 
+        if message.origin_hash != self.origin_hash {
+            return Err(ApplyPatchError::OriginMismatch);
+        }
+
         // First, apply the patch to the core (safely, to a clone)
         // and gather up as much metadata about the applied patch.
         let mut patched_core = self.core_map.clone();
         let (added, removed) = patched_core.apply(patch);
         let net_added = analyze_added_removed(&added, &removed);
-        let patched_membership_hash = MembershipHash::new(&patched_core);
+        let patched_membership_hash = MembershipHash::from_itc_map(&patched_core);
 
         // TODO: Fix this check. Sometimes the patch just has older values.
-        let clean_membership = patched_membership_hash == message.membership_hash;
+        let clean_membership = patched_membership_hash == message.membership_hash
+            || Some(patched_membership_hash) == message.outcome_hash;
         //|| patched_membership_hash == self.membership_hash();
         let (is_present, same_id, same_info) = if let Some(id) = find_id(&patched_core, self.uuid())
         {
@@ -321,7 +376,7 @@ where
 
         // Second, try to account for every edge case and fail miserably.
         match (clean_membership, is_present, same_id, same_info) {
-            (false, ..) => Err(ApplyPatchError::UncleanMembership),
+            (false, ..) => Err(ApplyPatchError::UncleanMembership(patched_membership_hash)),
             (_, false, ..) => Err(ApplyPatchError::NotPresentInNew),
             (true, true, false, ..) => Err(ApplyPatchError::DifferingId),
             (true, true, true, false) => {
@@ -512,8 +567,8 @@ fn compare_itc_maps<A>(a: &ItcMap<NodeInfo<A>>, b: &ItcMap<NodeInfo<A>>) -> i64 
     }
 
     merge.values().fold(0, |acc, (a, b)| match (a, b) {
-        (Some(a), None) => acc - 1,
-        (None, Some(b)) => acc + 1,
+        (Some(_a), None) => acc - 1,
+        (None, Some(_b)) => acc + 1,
         (Some(a), Some(b)) if a > b => acc - 1,
         (Some(a), Some(b)) if a < b => acc + 1,
         _ => acc,
@@ -535,6 +590,50 @@ fn itc_map_to_hash_map<A>(itc_map: &ItcMap<NodeInfo<A>>) -> HashMap<Uuid, u64> {
     map
 }
 
+fn compare_trees<A>(own_map: &ItcMapTree<A>, peer_map: &ItcMapTree<A>) -> bool {
+    use ItcMapTree::*;
+    match (own_map, peer_map) {
+        (Unknown, _) => panic!("Own map contains ItcMapTree::Unknown"),
+        (_own, Unknown) => todo!(),
+
+        (
+            Leaf {
+                id_tree: _id0,
+                timestamp: _ts0,
+                value: _v0,
+            },
+            Leaf {
+                id_tree: _id1,
+                timestamp: _ts1,
+                value: _v1,
+            },
+        ) => {
+            todo!()
+        }
+
+        (a @ Leaf { .. }, SubTree(l, r)) => {
+            let _l = compare_trees(a, l);
+            let _r = compare_trees(a, r);
+
+            todo!()
+        }
+
+        (SubTree(l, r), b @ Leaf { .. }) => {
+            let _l = compare_trees(l, b);
+            let _r = compare_trees(r, b);
+
+            todo!()
+        }
+
+        (SubTree(l0, r0), SubTree(l1, r1)) => {
+            let _l = compare_trees(l0, l1);
+            let _r = compare_trees(r0, r1);
+
+            todo!()
+        }
+    }
+}
+
 // PollinationMessage
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -542,7 +641,9 @@ pub struct PollinationMessage<A> {
     pub uuid: Uuid,
     pub id: IdTree,
     pub timestamp: EventTree,
+    pub origin_hash: OriginHash,
     pub membership_hash: MembershipHash,
+    pub outcome_hash: Option<MembershipHash>,
     pub unique_count: usize,
     pub patch: Option<Patch<NodeInfo<A>>>,
     pub new_membership: NewMembership,
@@ -554,10 +655,11 @@ impl<A: std::fmt::Debug> std::fmt::Display for PollinationMessage<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         write!(
             f,
-            "PollinationMessage {{ uuid={} id={} timestamp={} membership_hash={} unique_count={} new_membership={:?} full={} patch={} }}",
+            "PollinationMessage {{ uuid={} id={} timestamp={} origin_hash={} membership_hash={} unique_count={} new_membership={:?} full={} patch={} }}",
             self.uuid,
             self.id,
             self.timestamp,
+            self.origin_hash.0,
             self.membership_hash.0,
             self.unique_count,
             self.new_membership,
@@ -607,8 +709,8 @@ pub type Result<T> = std::result::Result<T, PollinationError>;
 
 #[derive(Debug, Error)]
 pub enum ApplyPatchError {
-    #[error("Incorrect membership_hash values")]
-    UncleanMembership,
+    #[error("Incorrect membership_hash value; matches neither self nor other: {0:?}")]
+    UncleanMembership(MembershipHash),
 
     #[error("Self not present")]
     NotPresentInNew,
@@ -621,6 +723,9 @@ pub enum ApplyPatchError {
 
     #[error("No patch present in the message")]
     NoPatch,
+
+    #[error("Origin mismatch")]
+    OriginMismatch,
 }
 
 // NodeInfo
@@ -661,28 +766,46 @@ enum NodeStatus {
 }
 
 // MembershipHash
+
 use simplehash::fnv1a_64;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy, Serialize, Deserialize, Hash)]
+#[derive(
+    PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy, Serialize, Deserialize, Hash, Default,
+)]
 pub struct MembershipHash(u64);
 
 impl MembershipHash {
-    fn new<A>(itc_map: &ItcMap<NodeInfo<A>>) -> Self {
-        let hash = itc_map.map_recursive(
-            &|node: &NodeInfo<A>| fnv1a_64(node.uuid.as_bytes()),
-            &|l, r| {
-                let mut bytes = [0u8; 16];
-                bytes[..8].copy_from_slice(&l.to_le_bytes());
-                bytes[8..].copy_from_slice(&r.to_le_bytes());
-                fnv1a_64(&bytes)
-            },
-        );
+    fn from_itc_map<A>(itc_map: &ItcMap<NodeInfo<A>>) -> Self {
+        itc_map.map_recursive(
+            &|node: &NodeInfo<A>| Self::hash(node.uuid.as_bytes()),
+            &|l, r| Self::combine(l, r),
+        )
+    }
 
-        Self(hash)
+    fn hash(bytes: &[u8]) -> Self {
+        Self(fnv1a_64(bytes))
+    }
+
+    fn combine(left: MembershipHash, right: MembershipHash) -> Self {
+        let mut bytes = [0u8; 16];
+        bytes[..8].copy_from_slice(&left.0.to_le_bytes());
+        bytes[8..].copy_from_slice(&right.0.to_le_bytes());
+        Self(fnv1a_64(&bytes))
     }
 
     pub fn u64(&self) -> u64 {
         self.0
+    }
+}
+
+#[derive(
+    PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy, Serialize, Deserialize, Hash, Default,
+)]
+pub struct OriginHash(u64);
+
+impl OriginHash {
+    fn from_membership_hash(mh: MembershipHash) -> Self {
+        Self(mh.0)
     }
 }
 
@@ -709,8 +832,8 @@ mod tests {
         m1.insert(i1.clone(), n0.clone());
         m1.insert(i0.clone(), n1.clone());
 
-        let h0 = MembershipHash::new(&m0);
-        let h1 = MembershipHash::new(&m1);
+        let h0 = MembershipHash::from_itc_map(&m0);
+        let h1 = MembershipHash::from_itc_map(&m1);
 
         assert_ne!(h0, h1);
     }

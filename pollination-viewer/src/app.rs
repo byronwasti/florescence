@@ -28,6 +28,7 @@ pub struct PollinationViewer {
 struct DurableState {
     sim_config: Config<PollinationConfig>,
     step_count: usize,
+    convergence_step_count: usize,
     jump_to: usize,
     truncate_history: bool,
     truncate_to: usize,
@@ -39,6 +40,7 @@ impl Default for DurableState {
     fn default() -> DurableState {
         Self {
             step_count: 1,
+            convergence_step_count: 100,
             jump_to: 0,
             sim_config: Config {
                 node_count: 3,
@@ -95,7 +97,7 @@ impl eframe::App for PollinationViewer {
         self.truncate_history();
 
         if self.e.run_to_convergence && !has_converged(&self.e.sim) {
-            self.run_steps_by_count_until_convergence();
+            self.run_until_convergence();
             ctx.request_repaint();
         } else {
             self.e.run_to_convergence = false;
@@ -139,7 +141,7 @@ impl PollinationViewer {
 
     fn truncate_history(&mut self) {
         if !self.d.truncate_history {
-            return
+            return;
         }
 
         let history = self.e.sim.history_mut();
@@ -156,8 +158,8 @@ impl PollinationViewer {
         self.e.plot_cache.invalidate();
     }
 
-    fn run_steps_by_count_until_convergence(&mut self) {
-        for _ in 0..self.d.step_count {
+    fn run_until_convergence(&mut self) {
+        for _ in 0..self.d.convergence_step_count {
             self.e.sim.step();
 
             if has_converged(&self.e.sim) {
@@ -210,18 +212,16 @@ impl PollinationViewer {
                     ui.label(format!("Event time {}", history.time()));
                     ui.label(format!("Wall time {}", history.wall_time()));
 
-                    for (offset, record) in history
-                        .records_iter()
-                        .enumerate()
-                        .filter(|(_, rec)| {
-                            if self.d.filter_to_node && let Some(id) = rec.node_id() {
-                                // TODO: Safer convert
-                                id == NodeIndex::from(self.d.filter_to_node_val as u32)
-                            } else {
-                                true
-                            }
-                        })
-                    {
+                    for (offset, record) in history.records_iter().enumerate().filter(|(_, rec)| {
+                        if self.d.filter_to_node
+                            && let Some(id) = rec.node_id()
+                        {
+                            // TODO: Safer convert
+                            id == NodeIndex::from(self.d.filter_to_node_val as u32)
+                        } else {
+                            true
+                        }
+                    }) {
                         match record {
                             HistoricalRecord::NodeEvent(record) => {
                                 let from_node =
@@ -239,7 +239,10 @@ impl PollinationViewer {
                                 ui.collapsing(
                                     format!(
                                         "{event_time} NodeId={:?} event={:?} {} ({:?})",
-                                        record.id, record.event, from_node, record.snapshot.inner().membership_hash()
+                                        record.id,
+                                        record.event,
+                                        from_node,
+                                        record.snapshot.inner().membership_hash()
                                     ),
                                     |ui| {
                                         ui.collapsing("Pre Node State", |ui| {
@@ -298,7 +301,7 @@ impl PollinationViewer {
                 ui.separator();
 
                 ui.add(
-                    egui::Slider::new(&mut self.d.step_count, 0..=1000)
+                    egui::Slider::new(&mut self.d.step_count, 1..=1000)
                         .logarithmic(true)
                         .clamping(egui::SliderClamping::Never)
                         .text("Step Count"),
@@ -308,6 +311,12 @@ impl PollinationViewer {
                     ui.label(format!("PANIC {panic}"));
                 }
 
+                ui.add(
+                    egui::Slider::new(&mut self.d.convergence_step_count, 1..=1000)
+                        .logarithmic(true)
+                        .clamping(egui::SliderClamping::Never)
+                        .text("Convergence Step Count"),
+                );
                 ui.toggle_value(&mut self.e.run_to_convergence, "Run to convergence");
                 if self.e.run_to_convergence {
                     ui.spinner();
@@ -429,8 +438,9 @@ fn draw_sim_node_info(ui: &mut Ui, node: &SimNode<SimulatedPollinationCore>) {
             });
 
             ui.collapsing("Mailbox", |ui| {
-                for mail in node.mailbox.iter() {
-                    ui.label(format!("{} -> {:?}", mail.from.index(), mail.msg));
+                for (idx, mail) in node.mailbox.iter().enumerate() {
+                    ui.collapsing(format!("Mail {idx}"), |ui| draw_mail(ui, Some(mail)));
+                    //ui.label(format!("{} -> {:?}", mail.from.index(), mail.msg));
                 }
             });
         });
@@ -438,6 +448,7 @@ fn draw_sim_node_info(ui: &mut Ui, node: &SimNode<SimulatedPollinationCore>) {
 
 fn draw_core_info(ui: &mut Ui, node: &PollinationCore<NodeIndex>) {
     ui.label(format!("UUID: {}", node.uuid()));
+    ui.label(format!("Origin Hash: {:?}", node.origin_hash()));
     ui.label(format!("Membership Hash: {:?}", node.membership_hash()));
     ui.label(format!("IdTree: {}", node.id()));
     ui.label(format!("Timestamp: {}", node.timestamp()));
@@ -482,9 +493,11 @@ fn draw_msg(ui: &mut egui::Ui, msg: &PollinationMessage<NodeIndex>) {
     ui.label(format!("Uuid: {}", &msg.uuid));
     ui.label(format!("IdTree: {}", &msg.id));
     ui.label(format!("Timestamp: {}", &msg.timestamp));
+    ui.label(format!("Origin Hash: {:?}", &msg.origin_hash));
     ui.label(format!("Membership Hash: {:?}", &msg.membership_hash));
     ui.label(format!("Unique Count: {}", &msg.unique_count));
     ui.label(format!("new_membership: {:?}", &msg.new_membership));
+    ui.label(format!("outcome_hash: {:?}", &msg.outcome_hash));
     ui.label(format!("full_patch: {}", &msg.full_patch));
 
     if let Some(patch) = &msg.patch {
