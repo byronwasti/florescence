@@ -30,6 +30,7 @@ struct DurableState {
     step_count: usize,
     convergence_step_count: usize,
     jump_to: usize,
+    show_history: bool,
     truncate_history: bool,
     truncate_to: usize,
     filter_to_node: bool,
@@ -50,6 +51,7 @@ impl Default for DurableState {
                     rand_robin_count: 2,
                 },
             },
+            show_history: true,
             truncate_history: true,
             truncate_to: 1000,
             filter_to_node: false,
@@ -107,8 +109,8 @@ impl eframe::App for PollinationViewer {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.draw_header(ui, frame);
         self.draw_history(ui, frame);
-        self.draw_controls(ui, frame);
         self.draw_membership_hash_distribution(ui, frame);
+        self.draw_controls(ui, frame);
         self.draw_scene(ui, frame);
     }
 }
@@ -176,104 +178,115 @@ impl PollinationViewer {
                 // No File->Quit on web pages
                 let is_web = cfg!(target_arch = "wasm32");
                 if !is_web {
-                    ui.menu_button("File", |ui| {
+                    ui.menu_button("☰", |ui| {
                         if ui.button("Quit").clicked() {
                             ui.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
+                        egui::widgets::global_theme_preference_buttons(ui);
                     });
                     ui.add_space(16.0);
                 }
-
-                egui::widgets::global_theme_preference_buttons(ui);
             });
         });
     }
 
     fn draw_history(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Window::new("History").show(ui, |ui| {
-            ui.checkbox(&mut self.d.truncate_history, "Truncate history");
-            if self.d.truncate_history {
-                ui.add(egui::Slider::new(&mut self.d.truncate_to, 1..=10000).text("Truncate to"));
-            }
+        egui::Panel::right("History")
+            .drag_to_open(true)
+            .show_collapsible(ui, &mut self.d.show_history, |ui| {
+                ui.checkbox(&mut self.d.truncate_history, "Truncate history");
+                if self.d.truncate_history {
+                    ui.add(
+                        egui::Slider::new(&mut self.d.truncate_to, 1..=10000).text("Truncate to"),
+                    );
+                }
 
-            ui.checkbox(&mut self.d.filter_to_node, "Filter to Node");
-            ui.add(
-                egui::Slider::new(
-                    &mut self.d.filter_to_node_val,
-                    0..=self.d.sim_config.node_count,
-                )
-                .text("Node Id"),
-            );
-            ScrollArea::vertical()
-                .stick_to_bottom(true)
-                .auto_shrink(false)
-                .show(ui, |ui| {
-                    let history = self.e.sim.history();
-                    ui.label(format!("Event time {}", history.time()));
-                    ui.label(format!("Wall time {}", history.wall_time()));
+                ui.checkbox(&mut self.d.filter_to_node, "Filter to Node");
+                ui.add(
+                    egui::Slider::new(
+                        &mut self.d.filter_to_node_val,
+                        0..=self.d.sim_config.node_count,
+                    )
+                    .text("Node Id"),
+                );
 
-                    for (offset, record) in history.records_iter().enumerate().filter(|(_, rec)| {
-                        if self.d.filter_to_node
-                            && let Some(id) = rec.node_id()
+                let history = self.e.sim.history();
+                ui.label(format!("Event time {}", history.time()));
+                ui.label(format!("Wall time {}", history.wall_time()));
+
+                ui.separator();
+
+                ScrollArea::vertical()
+                    .stick_to_bottom(true)
+                    .auto_shrink(false)
+                    .show(ui, |ui| {
+                        for (offset, record) in
+                            history.records_iter().enumerate().filter(|(_, rec)| {
+                                if self.d.filter_to_node
+                                    && let Some(id) = rec.node_id()
+                                {
+                                    // TODO: Safer convert
+                                    id == NodeIndex::from(self.d.filter_to_node_val as u32)
+                                } else {
+                                    true
+                                }
+                            })
                         {
-                            // TODO: Safer convert
-                            id == NodeIndex::from(self.d.filter_to_node_val as u32)
-                        } else {
-                            true
-                        }
-                    }) {
-                        match record {
-                            HistoricalRecord::NodeEvent(record) => {
-                                let from_node =
-                                    if matches!(record.event, PollinationEvent::HandleMessage) {
+                            match record {
+                                HistoricalRecord::NodeEvent(record) => {
+                                    let from_node = if matches!(
+                                        record.event,
+                                        PollinationEvent::HandleMessage
+                                    ) {
                                         let msg = record.msg_in.as_ref().expect("Some message");
                                         format!("from={:?}", msg.from)
                                     } else {
                                         "".to_string()
                                     };
 
-                                // TODO: Move this into the historical record, this is a silly thing
-                                // to do
-                                let event_time =
-                                    history.time() - history.records().len() as u64 + offset as u64;
-                                ui.collapsing(
-                                    format!(
-                                        "{event_time} NodeId={:?} event={:?} {} ({:?})",
-                                        record.id,
-                                        record.event,
-                                        from_node,
-                                        record.snapshot.inner().membership_hash()
-                                    ),
-                                    |ui| {
-                                        ui.collapsing("Pre Node State", |ui| {
-                                            draw_core_info(ui, record.snapshot.inner());
-                                        });
-                                        ui.collapsing("Msg In", |ui| {
-                                            draw_mail(ui, record.msg_in.as_ref());
-                                        });
-                                        ui.collapsing("Msgs Out", |ui| {
-                                            for (node_idx, msg) in record.msgs_out.iter() {
-                                                ui.label(format!("For {:?}", node_idx));
-                                                draw_msg(ui, msg);
-                                            }
-                                        });
-                                    },
-                                );
-                            }
-                            HistoricalRecord::NoEvent => {
-                                ui.label("No event took place.");
-                            }
-                            HistoricalRecord::Error(node_id, error) => {
-                                ui.label(format!("{node_id:?} had an error {error}"));
+                                    // TODO: Move this into the historical record, this is a silly thing
+                                    // to do
+                                    let event_time = history.time()
+                                        - history.records().len() as u64
+                                        + offset as u64;
+                                    ui.collapsing(
+                                        format!(
+                                            "{event_time} NodeId={:?} event={:?} {} ({:?})",
+                                            record.id,
+                                            record.event,
+                                            from_node,
+                                            record.snapshot.inner().membership_hash()
+                                        ),
+                                        |ui| {
+                                            ui.collapsing("Pre Node State", |ui| {
+                                                draw_core_info(ui, record.snapshot.inner());
+                                            });
+                                            ui.collapsing("Msg In", |ui| {
+                                                draw_mail(ui, record.msg_in.as_ref());
+                                            });
+                                            ui.collapsing("Msgs Out", |ui| {
+                                                for (node_idx, msg) in record.msgs_out.iter() {
+                                                    ui.label(format!("For {:?}", node_idx));
+                                                    draw_msg(ui, msg);
+                                                }
+                                            });
+                                        },
+                                    );
+                                }
+                                HistoricalRecord::NoEvent => {
+                                    ui.label("No event took place.");
+                                }
+                                HistoricalRecord::Error(node_id, error) => {
+                                    ui.label(format!("{node_id:?} had an error {error}"));
+                                }
                             }
                         }
-                    }
-                })
-        });
+                    });
+            });
     }
 
-    fn draw_controls(&mut self, ui: &egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Window::new("Sim Controls").show(ui, |ui| {
+    fn draw_controls(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        egui::Panel::left("Sim Controls").show(ui, |ui| {
             ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Seed");
@@ -326,9 +339,11 @@ impl PollinationViewer {
     }
 
     fn draw_membership_hash_distribution(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Window::new("Membership Hash Distribution").show(ui, |ui| {
-            draw_membership_hash_distribution_plot(ui, &mut self.e.plot_cache, &self.e.sim);
-        });
+        egui::Panel::bottom("Membership Hash Distribution")
+            .resizable(true)
+            .show(ui, |ui| {
+                draw_membership_hash_distribution_plot(ui, &mut self.e.plot_cache, &self.e.sim);
+            });
     }
 
     fn draw_scene(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
