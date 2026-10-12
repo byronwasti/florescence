@@ -328,7 +328,7 @@ where
         let mut all_ids = IdTree::zero();
         let mut inserts = outcome
             .insert
-            .drain()
+            .drain(..)
             .map(|(id, val)| (id, val.clone()))
             .collect::<Vec<_>>();
         for (id, val) in inserts.drain(..) {
@@ -443,15 +443,14 @@ fn find_id<A>(map: &ItcMap<NodeInfo<A>>, uuid: Uuid) -> Option<IdTree> {
 
 #[derive(Clone, Debug, PartialEq)]
 struct PatchOutcome<'a, A> {
-    insert: HashMap<IdTree, &'a NodeInfo<A>>,
+    insert: Vec<(IdTree, &'a NodeInfo<A>)>,
     // NOTE: This is a "compound" ID, not an Ideal IDTree
     corrupt_id: Option<IdTree>,
 }
 
 impl<'a, A> PatchOutcome<'a, A> {
     fn new(id: IdTree, node_info: &'a NodeInfo<A>) -> Self {
-        let mut insert = HashMap::new();
-        insert.insert(id, node_info);
+        let insert = vec![(id, node_info)];
         PatchOutcome {
             insert,
             ..Default::default()
@@ -465,8 +464,8 @@ impl<'a, A> PatchOutcome<'a, A> {
         }
     }
 
-    fn merge(mut self, other: PatchOutcome<'a, A>) -> Self {
-        self.insert.extend(other.insert);
+    fn merge(mut self, mut other: PatchOutcome<'a, A>) -> Self {
+        self.insert.append(&mut other.insert);
         self.corrupt_id = match (self.corrupt_id, other.corrupt_id) {
             (None, None) => None,
             (Some(v0), None) => Some(v0),
@@ -481,7 +480,7 @@ impl<'a, A> PatchOutcome<'a, A> {
 impl<'a, A> Default for PatchOutcome<'a, A> {
     fn default() -> Self {
         PatchOutcome {
-            insert: HashMap::new(),
+            insert: vec![],
             corrupt_id: None,
         }
     }
