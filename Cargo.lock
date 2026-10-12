@@ -417,6 +417,7 @@ dependencies = [
  "getrandom",
  "insta",
  "petgraph",
+ "pollination-simulation",
  "rand",
  "rand_chacha",
  "serde",
