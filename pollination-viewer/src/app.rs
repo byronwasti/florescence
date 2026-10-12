@@ -412,7 +412,7 @@ fn hashable_to_color<T: Hash>(hashable: T) -> Color32 {
 }
 
 fn has_converged(sim: &Sim<SimulatedPollinationCore>) -> bool {
-    sim.has_converged(|s: &SimulatedPollinationCore| s.membership_hash())
+    sim.has_converged(|s: &SimulatedPollinationCore| (s.membership_hash(), s.origin_hash()))
 }
 
 struct Cached<U> {

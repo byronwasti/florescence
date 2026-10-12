@@ -183,8 +183,15 @@ where
     ) -> Option<PollinationMessage<A>> {
         debug!("SELF_DUMP={}", self);
         info!("Message from={}, ItcId={}", message.uuid, message.id);
-        info!("Self Origin={:?} timestamp={}", self.origin_hash(), self.timestamp());
-        info!("Message Origin={:?} timestamp={}", message.origin_hash, message.timestamp);
+        info!(
+            "Self Origin={:?} timestamp={}",
+            self.origin_hash(),
+            self.timestamp()
+        );
+        info!(
+            "Message Origin={:?} timestamp={}",
+            message.origin_hash, message.timestamp
+        );
         find_id(&self.core_map, self.uuid()).expect("Self to exist");
 
         if message.origin_hash != self.origin_hash() {
@@ -339,10 +346,13 @@ where
         let new_timestamp = self.timestamp().clone().join(peer_map.timestamp().clone());
         let new_ts_diff = new_timestamp.clone().diff(&self.timestamp());
         if all_ids != IdTree::zero() && !new_ts_diff.contains(&all_ids) {
-            panic!("New TS doesn't contain all updates: new_ts_diff={new_ts_diff}, all_ids={all_ids}");
+            panic!(
+                "New TS doesn't contain all updates: new_ts_diff={new_ts_diff}, all_ids={all_ids}"
+            );
         }
         self.core_map.set_timestamp(new_timestamp);
         info!("Clean timestamp update");
+        assert!(self.core_map.is_complete());
         Ok(())
     }
 
@@ -369,7 +379,10 @@ where
         } else {
             info!("Peers to add; sending provide member message");
             self.add_peers(peers);
-            info!("prev_id={prev_id} prev_ts={prev_timestamp} new_ts={}", self.timestamp());
+            info!(
+                "prev_id={prev_id} prev_ts={prev_timestamp} new_ts={}",
+                self.timestamp()
+            );
             // TODO: This assert doesn't work but it does point to an optimization.
             // Raising the timestamp individually is less efficient than incrementing it for all at
             // once (more fill opportunities when its all together). Given Ideal IDs there should be
@@ -523,9 +536,16 @@ where
                         // Panicking for now because we don't have removal of peers yet, so this
                         // should never happen. In the future we just take the greater
                         warn!(
-                            "UUID skew between equal peers. Indicates a partition event occurred."
+                            "UUID skew between equal peers. Indicates a partition event occurred. {} != {}",
+                            v0.uuid, v1.uuid,
                         );
-                        panic!("TODO: Remove panic");
+                        // TODO: UGH this stuff is hard
+                        //panic!("TODO: Remove panic");
+                        if v1.uuid > v0.uuid {
+                            PatchOutcome::new((*id1).clone(), v1)
+                        } else {
+                            PatchOutcome::default()
+                        }
                     } else {
                         // TODO: Both of these asserts _should_ apply, but unfortunately
                         // don't during convergence. Need to figure out a way to make them work.

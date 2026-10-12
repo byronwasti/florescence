@@ -18,6 +18,10 @@ impl SimulatedPollinationCore {
         self.inner.membership_hash()
     }
 
+    pub fn origin_hash(&self) -> OriginHash {
+        self.inner.origin_hash()
+    }
+
     pub fn timestamp(&self) -> &EventTree {
         self.inner.timestamp()
     }
