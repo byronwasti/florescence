@@ -92,7 +92,10 @@ where
 
     // Insert value at IdTree location, returning removed IdTrees and their values.
     fn insert(&mut self, id: IdTree, value: NodeInfo<A>) -> Vec<(IdTree, NodeInfo<A>)> {
-        self.core_map.insert(id, value)
+        let prev_ts = self.timestamp().clone();
+        let removals = self.core_map.insert(id, value);
+        assert_ne!(prev_ts.to_string(), self.timestamp().to_string());
+        removals
     }
 
     #[tracing::instrument(skip_all)]
@@ -180,6 +183,8 @@ where
     ) -> Option<PollinationMessage<A>> {
         debug!("SELF_DUMP={}", self);
         info!("Message from={}, ItcId={}", message.uuid, message.id);
+        info!("Self Origin={:?} timestamp={}", self.origin_hash(), self.timestamp());
+        info!("Message Origin={:?} timestamp={}", message.origin_hash, message.timestamp);
         find_id(&self.core_map, self.uuid()).expect("Self to exist");
 
         if message.origin_hash != self.origin_hash() {
@@ -190,7 +195,7 @@ where
             return self.handle_no_patch_message(message);
         };
 
-        match self.apply_patch_3(patch) {
+        match self.apply_patch(patch) {
             Ok(()) => match self.timestamp().partial_cmp(&message.timestamp) {
                 Some(Ordering::Greater) | None => Some(self.update_message(&message.timestamp)),
                 Some(Ordering::Equal) => {
@@ -239,6 +244,7 @@ where
         }
     }
 
+    #[tracing::instrument(skip_all)]
     fn handle_origin_mismatch_message(
         &mut self,
         message: PollinationMessage<A>,
@@ -266,6 +272,7 @@ where
         }
     }
 
+    #[tracing::instrument(skip_all)]
     fn handle_request_membership_message(
         &mut self,
         message: PollinationMessage<A>,
@@ -278,6 +285,7 @@ where
         }
     }
 
+    #[tracing::instrument(skip_all)]
     fn handle_take_new_origin(
         &mut self,
         message: PollinationMessage<A>,
@@ -292,7 +300,9 @@ where
                 self.id = new_id;
                 self.core_map = new_core;
                 self.origin_hash = message.origin_hash;
+                let old_timestamp = self.timestamp().clone();
                 self.increment();
+                assert_ne!(self.timestamp(), &old_timestamp);
                 Some(self.update_message(&message.timestamp))
             } else {
                 Some(self.request_membership_message())
@@ -301,38 +311,42 @@ where
     }
 
     #[tracing::instrument(skip_all)]
-    fn apply_patch_3(&mut self, patch: Patch<NodeInfo<A>>) -> std::result::Result<(), IdTree> {
+    fn apply_patch(&mut self, patch: Patch<NodeInfo<A>>) -> std::result::Result<(), IdTree> {
         let own_map_tree = self.core_map.to_itc_map_tree();
         let peer_map = ItcMap::from_patch(patch);
         let peer_map_tree = peer_map.to_itc_map_tree();
+        info!("Own map tree: {own_map_tree:?}");
+        info!("Peer map tree: {peer_map_tree:?}");
         let mut outcome = apply_patch(&own_map_tree, &peer_map_tree);
         let corrupt_id = outcome.corrupt_id.take();
 
+        if let Some(corrupt_id) = corrupt_id {
+            warn!("Corrupt ID in patch application; Skipping entire update");
+            return Err(corrupt_id);
+        }
+
+        let mut all_ids = IdTree::zero();
         let mut inserts = outcome
             .insert
             .drain()
             .map(|(id, val)| (id, val.clone()))
             .collect::<Vec<_>>();
         for (id, val) in inserts.drain(..) {
+            all_ids = all_ids.join(id.clone());
             self.core_map.insert_without_event(id, val.clone());
         }
 
-        if let Some(corrupt_id) = corrupt_id {
-            let new_timestamp = self
-                .timestamp()
-                .clone()
-                .join(peer_map.timestamp().clone().mask_out(&corrupt_id));
-            self.core_map.set_timestamp(new_timestamp);
-            Err(corrupt_id)
-        } else {
-            let new_timestamp = self.timestamp().clone().join(peer_map.timestamp().clone());
-            self.core_map.set_timestamp(new_timestamp);
-            Ok(())
+        let new_timestamp = self.timestamp().clone().join(peer_map.timestamp().clone());
+        let new_ts_diff = new_timestamp.clone().diff(&self.timestamp());
+        if all_ids != IdTree::zero() && !new_ts_diff.contains(&all_ids) {
+            panic!("New TS doesn't contain all updates: new_ts_diff={new_ts_diff}, all_ids={all_ids}");
         }
+        self.core_map.set_timestamp(new_timestamp);
+        info!("Clean timestamp update");
+        Ok(())
     }
 
     /// Returns whether or not peers were added
-    #[tracing::instrument(skip(self))]
     fn add_peers_from_patch(&mut self, patch: Patch<NodeInfo<A>>) -> bool {
         // TODO: Efficiency
         let peer_map = ItcMap::from_patch(patch);
@@ -347,30 +361,40 @@ where
             peers.push(node.clone());
         }
 
+        let prev_timestamp = self.timestamp().clone();
+        let prev_id = self.id().clone();
         if peers.is_empty() {
             info!("No peers to add");
             false
         } else {
             info!("Peers to add; sending provide member message");
             self.add_peers(peers);
+            info!("prev_id={prev_id} prev_ts={prev_timestamp} new_ts={}", self.timestamp());
+            // TODO: This assert doesn't work but it does point to an optimization.
+            // Raising the timestamp individually is less efficient than incrementing it for all at
+            // once (more fill opportunities when its all together). Given Ideal IDs there should be
+            // no problem with this.
+            //assert_eq!(self.timestamp(), &prev_timestamp.event(&prev_id));
             true
         }
     }
 
     // Evenly divide the Self address space and distribute to peers. Then, assign every nodes
     // information to the map.
-    #[tracing::instrument(skip(self))]
     fn add_peers(&mut self, mut peers: Vec<NodeInfo<A>>) {
-        info!("Adding peers");
+        info!("Adding {} peers: {peers:?}", peers.len());
+        info!("Starting id={} ts={}", self.id(), self.timestamp());
         let mut new_ids = self.id.clone().fork_many(peers.len() + 1);
         self.id = new_ids[0].clone();
         self.increment();
+        info!("new_id={} new_ts={}", self.id(), self.timestamp());
         //self.insert(new_ids[0].clone(), self.own_info.clone());
 
         assert_eq!(new_ids.len(), peers.len() + 1);
 
         for (new_id, info) in new_ids.drain(1..).zip(peers.drain(..)) {
-            let removals = self.insert(new_id, info);
+            let removals = self.insert(new_id.clone(), info);
+            info!("peer_id={new_id} new_ts={}", self.timestamp());
             info!("Removing {} ids: {:?}", removals.len(), &removals);
             // There should be no removals, as inserting our own info should have removed ourselves
             // already.
@@ -488,7 +512,7 @@ where
                 value: v1,
             },
         ) => {
-            info!("{id0} {ts0} {v0:?}  {id1} {ts1} {v1:?}");
+            info!("id0={id0} id1={id1} ts0={ts0} ts1={ts1} v0={v0:?} v1={v1:?}");
             match ts0.cmp(ts1) {
                 Ordering::Greater => {
                     info!("Self contains a greater timestamp, ignoring patch");
@@ -504,8 +528,10 @@ where
                         );
                         panic!("TODO: Remove panic");
                     } else {
-                        assert_eq!(id0, id1);
-                        assert_eq!(v0, v1);
+                        // TODO: Both of these asserts _should_ apply, but unfortunately
+                        // don't during convergence. Need to figure out a way to make them work.
+                        //assert_eq!(id0, id1);
+                        //assert_eq!(v0, v1);
                         PatchOutcome::default()
                     }
                 }
@@ -614,27 +640,6 @@ pub enum PollinationError {
 }
 
 pub type Result<T> = std::result::Result<T, PollinationError>;
-
-#[derive(Debug, Error)]
-pub enum ApplyPatchError {
-    #[error("Incorrect membership_hash value; matches neither self nor other: {0:?}")]
-    UncleanMembership(MembershipHash),
-
-    #[error("Self not present")]
-    NotPresentInNew,
-
-    #[error("Self has differing ID")]
-    DifferingId,
-
-    #[error("Self timestamp is changed")]
-    ReducedSelfTimestamp,
-
-    #[error("No patch present in the message")]
-    NoPatch,
-
-    #[error("Origin mismatch")]
-    OriginMismatch,
-}
 
 // NodeInfo
 

@@ -256,7 +256,7 @@ impl PollinationViewer {
                                             record.id,
                                             record.event,
                                             from_node,
-                                            record.snapshot.inner().membership_hash()
+                                            record.snapshot.inner().origin_hash()
                                         ),
                                         |ui| {
                                             ui.collapsing("Pre Node State", |ui| {
