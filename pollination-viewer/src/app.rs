@@ -96,7 +96,9 @@ impl eframe::App for PollinationViewer {
             self.run_steps_by_count();
         }
 
-        self.truncate_history();
+        if self.d.truncate_history {
+            self.e.sim.history_mut().truncate(self.d.truncate_to);
+        }
 
         if self.e.run_to_convergence && !has_converged(&self.e.sim) {
             self.run_until_convergence();
@@ -135,21 +137,9 @@ impl PollinationViewer {
         self.e.force_graph_state.run_force_simulation();
         for _ in 0..self.d.jump_to + 1 {
             self.e.sim.step();
-            self.truncate_history();
         }
         self.e.plot_cache.invalidate();
         self.e.scene = scene;
-    }
-
-    fn truncate_history(&mut self) {
-        if !self.d.truncate_history {
-            return;
-        }
-
-        let history = self.e.sim.history_mut();
-        if history.records().len() >= 2 * self.d.truncate_to {
-            history.truncate(self.d.truncate_to);
-        }
     }
 
     fn run_steps_by_count(&mut self) {
@@ -247,9 +237,8 @@ impl PollinationViewer {
 
                                     // TODO: Move this into the historical record, this is a silly thing
                                     // to do
-                                    let event_time = history.time()
-                                        - history.records().len() as u64
-                                        + offset as u64;
+                                    let event_time =
+                                        history.time() - history.len() as u64 + offset as u64;
                                     ui.collapsing(
                                         format!(
                                             "{event_time} NodeId={:?} event={:?} {} ({:?})",
@@ -546,7 +535,7 @@ fn draw_membership_hash_distribution_plot(
         let history = sim.history();
 
         // Event time of the first record still retained in the (possibly truncated) history.
-        let start_time = history.time() - history.records().len() as u64;
+        let start_time = history.time() - history.len() as u64;
 
         // Replay history, tracking each node's latest known membership hash so we can
         // derive, at every state change, how many nodes currently belong to each group.

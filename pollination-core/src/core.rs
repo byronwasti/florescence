@@ -94,7 +94,7 @@ where
     fn insert(&mut self, id: IdTree, value: NodeInfo<A>) -> Vec<(IdTree, NodeInfo<A>)> {
         let prev_ts = self.timestamp().clone();
         let removals = self.core_map.insert(id, value);
-        assert_ne!(prev_ts.to_string(), self.timestamp().to_string());
+        assert_ne!(&prev_ts, self.timestamp());
         removals
     }
 

@@ -1,6 +1,6 @@
 use crate::{mailbox::Mail, traits::Simulee};
 use petgraph::graph::NodeIndex;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 /// Everything preceding the current moment in time of the Simulation is
 /// contained in the History. There are two timestamps which are used, to allow
@@ -9,10 +9,11 @@ use std::collections::HashMap;
 /// parallel execution and timeouts work nicely together.
 #[derive(Debug)]
 pub struct History<S: Simulee> {
-    records: Vec<HistoricalRecord<S>>,
+    records: VecDeque<HistoricalRecord<S>>,
     wall_time: u64,
     event_time: u64,
     index: HistoricalIndex,
+    truncate: Option<usize>,
 }
 
 impl<S: Simulee> History<S> {
@@ -28,8 +29,8 @@ impl<S: Simulee> History<S> {
         self.wall_time
     }
 
-    pub fn records(&self) -> &[HistoricalRecord<S>] {
-        &self.records
+    pub fn len(&self) -> usize {
+        self.records.len()
     }
 
     pub fn records_iter(&self) -> impl Iterator<Item = &HistoricalRecord<S>> {
@@ -37,12 +38,14 @@ impl<S: Simulee> History<S> {
     }
 
     pub fn truncate(&mut self, count: usize) {
-        let to_cut = self.records.len() - count;
-        self.records.drain(..to_cut);
+        self.truncate = Some(count);
+        self.records.retain_back(count);
+        //let to_cut = self.records.len() - count;
+        //self.records.drain(..to_cut);
     }
 
     pub fn last(&self) -> Option<&HistoricalRecord<S>> {
-        self.records.last()
+        self.records.back()
     }
 
     /// Record a record. English is fun.
@@ -59,7 +62,12 @@ impl<S: Simulee> History<S> {
             _ => {}
         }
 
-        self.records.push(record);
+        if let Some(truncate) = self.truncate
+            && self.records.len() == truncate
+        {
+            self.records.pop_front();
+        }
+        self.records.push_back(record);
         self.event_time += 1;
     }
 }
@@ -67,10 +75,11 @@ impl<S: Simulee> History<S> {
 impl<S: Simulee> Default for History<S> {
     fn default() -> Self {
         Self {
-            records: vec![],
+            records: VecDeque::new(),
             wall_time: 0,
             event_time: 0,
             index: HistoricalIndex::default(),
+            truncate: None,
         }
     }
 }
