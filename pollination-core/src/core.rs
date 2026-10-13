@@ -84,10 +84,20 @@ where
     }
 
     /// Increment the logical timestamp associated with this nodes data.
+    #[tracing::instrument(skip_all)]
     pub fn increment(&mut self) {
+        let removals = self.increment_inner();
+        assert_eq!(removals.len(), 1);
+    }
+
+    // Unchecked `increment()` for used with recycling logic
+    fn increment_inner(&mut self) -> Vec<(IdTree, NodeInfo<A>)> {
         self.own_info.timestamp += 1;
         let removals = self.insert(self.id.clone(), self.own_info().clone());
-        assert_eq!(removals.len(), 1);
+        for (id, data) in &removals {
+            info!("Removing {id} value={data}")
+        }
+        removals
     }
 
     // Insert value at IdTree location, returning removed IdTrees and their values.
@@ -97,6 +107,8 @@ where
         assert_ne!(&prev_ts, self.timestamp());
         removals
     }
+
+    /** Messages **/
 
     #[tracing::instrument(skip_all)]
     pub fn heartbeat_message(&self) -> PollinationMessage<A> {
@@ -148,33 +160,7 @@ where
         msg
     }
 
-    #[tracing::instrument(skip(self))]
-    pub fn recycle(&mut self) -> bool {
-        info!("Recycling?");
-        let dead_peers: Option<IdTree> = self
-            .core_map
-            .iter()
-            .filter_map(|(id, info)| {
-                if info.status == NodeStatus::Dead {
-                    Some(id.to_owned())
-                } else {
-                    None
-                }
-            })
-            .reduce(|acc, id| acc.join(id));
-
-        let Some(dead_peers) = dead_peers else {
-            return false;
-        };
-
-        let new_id = crate::recycling::recycle_ids(self.id.clone(), dead_peers);
-        if self.id != new_id {
-            self.id = new_id;
-            true
-        } else {
-            false
-        }
-    }
+    /** Message Handling **/
 
     #[tracing::instrument(skip_all,fields(id=?self.addr()))]
     pub fn handle_message(
@@ -192,7 +178,10 @@ where
             "Message Origin={:?} timestamp={}",
             message.origin_hash, message.timestamp
         );
-        find_id(&self.core_map, self.uuid()).expect("Self to exist");
+        find_first_valid_id(&self.core_map, self.uuid()).expect("Self to exist");
+
+        // TODO: Is there a better place this should go? I feel like in-line is totally fine
+        self.recycle();
 
         if message.origin_hash != self.origin_hash() {
             return self.handle_origin_mismatch_message(message);
@@ -301,7 +290,7 @@ where
             Some(self.request_membership_message())
         } else {
             let new_core = ItcMap::from_patch(message.patch.expect("Expected patch to be present"));
-            if let Some(new_id) = find_id(&new_core, self.uuid()) {
+            if let Some(new_id) = find_first_valid_id(&new_core, self.uuid()) {
                 // TODO: Also add any new peers at this point
 
                 self.id = new_id;
@@ -317,12 +306,16 @@ where
         }
     }
 
+    /** Misc. Helper methods **/
+
     #[tracing::instrument(skip_all)]
     fn apply_patch(&mut self, patch: Patch<NodeInfo<A>>) -> std::result::Result<(), IdTree> {
         let own_map_tree = self.core_map.to_itc_map_tree();
-        let peer_map = ItcMap::from_patch(patch);
-        let peer_map_tree = peer_map.to_itc_map_tree();
         info!("Own map tree: {own_map_tree:?}");
+        info!("Peer Patch: {patch}");
+        let peer_map = ItcMap::from_patch(patch);
+        info!("Peer map: {peer_map}");
+        let peer_map_tree = peer_map.to_itc_map_tree();
         info!("Peer map tree: {peer_map_tree:?}");
         let mut outcome = apply_patch(&own_map_tree, &peer_map_tree);
         let corrupt_id = outcome.corrupt_id.take();
@@ -364,7 +357,7 @@ where
         let mut peers = vec![];
         for (_, node) in peer_map.iter() {
             // TODO: Horribly inefficient; does it matter?
-            if find_id(&self.core_map, node.uuid).is_some() {
+            if find_first_valid_id(&self.core_map, node.uuid).is_some() {
                 continue;
             }
 
@@ -414,6 +407,63 @@ where
             assert!(removals.is_empty());
         }
     }
+
+    /** Recycling **/
+
+    pub fn recycle(&mut self) -> bool {
+        self.recycle_duplicate_self();
+        let res = self.recycle_dead_peers();
+        assert!(self.core_map.is_complete());
+        res
+    }
+
+    fn recycle_duplicate_self(&mut self) {
+        let mut to_remove = vec![];
+
+        for (id, value) in self.core_map.iter() {
+            if value.uuid == self.uuid() && id != self.id() && value.status != NodeStatus::Dead {
+                to_remove.push((id.clone(), value.clone()));
+            }
+        }
+
+        for (id, mut value) in to_remove.drain(..) {
+            info!("Marking duplicate as dead: id={id} value={value}");
+            value.status = NodeStatus::Dead;
+            self.insert(id, value);
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
+    fn recycle_dead_peers(&mut self) -> bool {
+        info!("Recycling old IDs");
+        let dead_peers: Option<IdTree> = self
+            .core_map
+            .iter()
+            .filter_map(|(id, info)| {
+                if info.status == NodeStatus::Dead {
+                    Some(id.to_owned())
+                } else {
+                    None
+                }
+            })
+            .reduce(|acc, id| acc.join(id));
+
+        let Some(dead_peers) = dead_peers else {
+            return false;
+        };
+
+        info!("Dead peers, attempting to recycle");
+        let new_id = crate::recycling::recycle_ids(self.id.clone(), dead_peers);
+        if self.id != new_id {
+            info!("Old IDs recycled, new_id={new_id}");
+            self.id = new_id;
+            self.increment_inner();
+            info!("New timestamp: {}", self.timestamp());
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl<A: std::fmt::Debug> std::fmt::Display for PollinationCore<A> {
@@ -447,9 +497,11 @@ impl<A: std::fmt::Debug> std::fmt::Display for PollinationCore<A> {
     }
 }
 
-fn find_id<A>(map: &ItcMap<NodeInfo<A>>, uuid: Uuid) -> Option<IdTree> {
+// TODO: This could be expanded to "find_ids"; though probably a smarter ID selection & reorg is
+// better long-term
+fn find_first_valid_id<A>(map: &ItcMap<NodeInfo<A>>, uuid: Uuid) -> Option<IdTree> {
     map.iter()
-        .find(|(_, info)| info.uuid == uuid)
+        .find(|(_, info)| info.uuid == uuid && info.status == NodeStatus::Healthy)
         .map(|(id, _)| id)
         .cloned()
 }
@@ -708,7 +760,7 @@ pub struct MembershipHash(u64);
 
 impl MembershipHash {
     fn from_itc_map<A>(itc_map: &ItcMap<NodeInfo<A>>) -> Self {
-        itc_map.map_recursive(
+        itc_map.fold_recursive(
             &|node: &NodeInfo<A>| Self::hash(node.uuid.as_bytes()),
             &|l, r| Self::combine(l, r),
         )
