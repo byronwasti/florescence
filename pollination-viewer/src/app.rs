@@ -66,7 +66,8 @@ struct EphemeralState {
     scene: Rect,
     force_graph_state: ForceGraphState,
     run_to_convergence: bool,
-    plot_cache: Cached<MembershipPlotSeries>,
+    plot_cache_membership: Cached<MembershipPlotSeries>,
+    plot_cache_origin: Cached<OriginPlotSeries>,
 }
 
 impl EphemeralState {
@@ -80,7 +81,8 @@ impl EphemeralState {
             scene: Rect::from_two_pos(Pos2::new(-500.0, -300.0), Pos2::new(500.0, 300.0)),
             force_graph_state,
             run_to_convergence: false,
-            plot_cache: Cached::new(),
+            plot_cache_membership: Cached::new(),
+            plot_cache_origin: Cached::new(),
         }
     }
 }
@@ -138,16 +140,21 @@ impl PollinationViewer {
         for _ in 0..self.d.jump_to + 1 {
             self.e.sim.step();
         }
-        self.e.plot_cache.invalidate();
+        self.invalidate_caches();
         self.e.scene = scene;
+    }
+
+    fn invalidate_caches(&mut self) {
+        self.e.plot_cache_membership.invalidate();
+        self.e.plot_cache_origin.invalidate();
+        //self.e.force_graph_state.run_force_simulation();
     }
 
     fn run_steps_by_count(&mut self) {
         for _ in 0..self.d.step_count {
             self.e.sim.step();
         }
-        //self.e.force_graph_state.run_force_simulation();
-        self.e.plot_cache.invalidate();
+        self.invalidate_caches();
     }
 
     fn run_until_convergence(&mut self) {
@@ -158,8 +165,7 @@ impl PollinationViewer {
                 break;
             }
         }
-        //self.e.force_graph_state.run_force_simulation();
-        self.e.plot_cache.invalidate();
+        self.invalidate_caches();
     }
 
     fn draw_header(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -335,7 +341,25 @@ impl PollinationViewer {
             .min_size(30.0)
             .resizable(true)
             .show(ui, |ui| {
-                draw_membership_hash_distribution_plot(ui, &mut self.e.plot_cache, &self.e.sim);
+                ui.columns_const(|[left, right]| {
+                    draw_membership_hash_distribution_plot(
+                        left,
+                        &mut self.e.plot_cache_membership,
+                        &self.e.sim,
+                    );
+                    draw_origin_hash_distribution_plot(
+                        right,
+                        &mut self.e.plot_cache_origin,
+                        &self.e.sim,
+                    );
+                });
+                /*
+                ui.horizontal(|ui| {
+                    draw_membership_hash_distribution_plot(ui, &mut self.e.plot_cache_membership, &self.e.sim);
+                    ui.separator();
+                    draw_origin_hash_distribution_plot(ui, &mut self.e.plot_cache_origin, &self.e.sim);
+                });
+                */
             });
     }
 
@@ -585,7 +609,102 @@ fn draw_membership_hash_distribution_plot(
     hashes.sort_unstable();
 
     Plot::new("membership_hash_distribution")
-        .height(200.0)
+        .min_size((200.0, 200.0).into())
+        //.height(200.0)
+        //.width(200.0)
+        //.legend(Legend::default())
+        .include_y(0.0)
+        .include_y(node_count as f64)
+        .show_crosshair(true)
+        .grid_fade(1.0)
+        .x_axis_label("Event Time")
+        .y_axis_label("Node Count")
+        .label_formatter(|pos| match pos {
+            HoverPosition::NearDataPoint {
+                plot_name,
+                position,
+                ..
+            } if !plot_name.is_empty() => Some(format!("{}: {}", plot_name, position.y)),
+            _ => None,
+        })
+        .show(ui, |plot_ui| {
+            for hash in hashes {
+                let points: Vec<[f64; 2]> = series[&hash]
+                    .iter()
+                    .map(|&(time, count)| [time, count])
+                    .collect();
+                let line = Line::new(format!("{hash}"), PlotPoints::new(points))
+                    .color(hashable_to_color(hash));
+                plot_ui.line(line);
+            }
+        });
+}
+
+type OriginPlotSeries = HashMap<u64, Vec<(f64, f64)>>;
+
+fn draw_origin_hash_distribution_plot(
+    ui: &mut Ui,
+    cache: &mut Cached<OriginPlotSeries>,
+    sim: &Sim<SimulatedPollinationCore>,
+) {
+    let node_count = sim.nodes().count();
+    let series = cache.get(|| {
+        let history = sim.history();
+
+        // Event time of the first record still retained in the (possibly truncated) history.
+        let start_time = history.time() - history.len() as u64;
+
+        // Replay history, tracking each node's latest known membership hash so we can
+        // derive, at every state change, how many nodes currently belong to each group.
+        let mut latest: HashMap<NodeIndex, u64> = HashMap::new();
+        let mut counts: HashMap<u64, usize> = HashMap::new();
+        let mut series: OriginPlotSeries = HashMap::new();
+
+        for (offset, record) in history.records_iter().enumerate() {
+            let HistoricalRecord::NodeEvent(node_record) = record else {
+                continue;
+            };
+
+            let new_hash = node_record.snapshot.origin_hash().u64();
+            let old_hash = latest.insert(node_record.id, new_hash);
+            if old_hash == Some(new_hash) {
+                continue;
+            }
+
+            let event_time = (start_time + offset as u64) as f64;
+
+            if let Some(old_hash) = old_hash {
+                let count = counts.entry(old_hash).or_insert(0);
+                *count -= 1;
+                series
+                    .entry(old_hash)
+                    .or_default()
+                    .push((event_time, *count as f64));
+            }
+
+            let count = counts.entry(new_hash).or_insert(0);
+            *count += 1;
+            series
+                .entry(new_hash)
+                .or_default()
+                .push((event_time, *count as f64));
+        }
+        series
+    });
+
+    ui.label("Origin Hash Distribution");
+
+    if series.is_empty() {
+        ui.label("No history yet.");
+        return;
+    }
+
+    let mut hashes: Vec<u64> = series.keys().copied().collect();
+    hashes.sort_unstable();
+
+    Plot::new("origin_hash_distribution")
+        .min_size((200.0, 200.0).into())
+        //.width(200.0)
         //.legend(Legend::default())
         .include_y(0.0)
         .include_y(node_count as f64)

@@ -179,6 +179,7 @@ where
             message.origin_hash, message.timestamp
         );
         find_first_valid_id(&self.core_map, self.uuid()).expect("Self to exist");
+
         // TODO: core_map can be incomplete; definitely need a cache system or something
         //assert!(self.core_map.is_complete());
 
@@ -334,6 +335,7 @@ where
             .map(|(id, val)| (id, val.clone()))
             .collect::<Vec<_>>();
         for (id, val) in inserts.drain(..) {
+            info!("Insert id={id} value={val}");
             all_ids = all_ids.join(id.clone());
             self.core_map.insert_without_event(id, val.clone());
         }
@@ -341,7 +343,9 @@ where
         let new_timestamp = self.timestamp().clone().join(peer_map.timestamp().clone());
         let new_ts_diff = new_timestamp.clone().diff(&self.timestamp());
         if all_ids != IdTree::zero() && !new_ts_diff.contains(&all_ids) {
-            panic!(
+            // TODO: This maybe should be a panic?
+            // XXX: I feel like this should panic
+            error!(
                 "New TS doesn't contain all updates: new_ts_diff={new_ts_diff}, all_ids={all_ids}"
             );
         }
@@ -805,6 +809,10 @@ pub struct OriginHash(u64);
 impl OriginHash {
     fn from_membership_hash(mh: MembershipHash) -> Self {
         Self(mh.0)
+    }
+
+    pub fn u64(&self) -> u64 {
+        self.0
     }
 }
 
