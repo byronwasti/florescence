@@ -359,8 +359,8 @@ impl PollinationViewer {
                                         return (Color32::RED, Color32::RED);
                                     };
                                 (
-                                    hashable_to_color(membership_hash),
                                     hashable_to_color(origin_hash),
+                                    hashable_to_color(membership_hash),
                                 )
                             })
                             .with_node_info_provider(&|ui, id| {
