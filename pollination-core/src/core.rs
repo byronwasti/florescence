@@ -90,7 +90,7 @@ where
         assert_eq!(removals.len(), 1);
     }
 
-    // Unchecked `increment()` for used with recycling logic
+    // Unchecked `increment()` for use with recycling logic
     fn increment_inner(&mut self) -> Vec<(IdTree, NodeInfo<A>)> {
         self.own_info.timestamp += 1;
         let removals = self.insert(self.id.clone(), self.own_info().clone());
@@ -179,6 +179,8 @@ where
             message.origin_hash, message.timestamp
         );
         find_first_valid_id(&self.core_map, self.uuid()).expect("Self to exist");
+        // TODO: core_map can be incomplete; definitely need a cache system or something
+        //assert!(self.core_map.is_complete());
 
         // TODO: Is there a better place this should go? I feel like in-line is totally fine
         self.recycle();
@@ -345,7 +347,9 @@ where
         }
         self.core_map.set_timestamp(new_timestamp);
         info!("Clean timestamp update");
-        assert!(self.core_map.is_complete());
+        if !self.core_map.is_complete() {
+            error!("Core_map is incomplete after patch; will crash");
+        }
         Ok(())
     }
 
@@ -413,7 +417,9 @@ where
     pub fn recycle(&mut self) -> bool {
         self.recycle_duplicate_self();
         let res = self.recycle_dead_peers();
-        assert!(self.core_map.is_complete());
+        // TODO: Map is allowed to be incomplete, but maybe we check that it isn't made
+        // more incomplete by this?
+        //assert!(self.core_map.is_complete());
         res
     }
 
@@ -561,7 +567,14 @@ where
     use ItcMapTree::*;
 
     match (own_map, peer_map) {
-        (Unknown, _) => panic!("Own map contains ItcMapTree::Unknown"),
+        (Unknown, Unknown) => PatchOutcome::default(),
+        (Unknown, Leaf { id_tree, value, .. }) => PatchOutcome::new((*id_tree).clone(), value),
+        (a @ Unknown, SubTree(l, r)) => {
+            let l = apply_patch(a, l);
+            let r = apply_patch(a, r);
+            let outcome = l.merge(r);
+            outcome
+        }
         (_, Unknown) => PatchOutcome::default(),
 
         (
