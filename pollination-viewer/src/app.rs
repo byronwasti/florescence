@@ -352,16 +352,15 @@ impl PollinationViewer {
                         ForceGraphWidget::new(&mut self.e.force_graph_state)
                             .with_node_color_provider(&|id: u32| {
                                 let node = self.e.sim.get_node(id.into()).expect("node");
-                                let membership_hash = if let Some(inner) = node.inner() {
-                                    inner.membership_hash()
-                                } else {
-                                    return (Color32::RED, Color32::RED);
-                                };
-                                //let timestamp = node.inner().timestamp();
+                                let (membership_hash, origin_hash) =
+                                    if let Some(inner) = node.inner() {
+                                        (inner.membership_hash(), inner.origin_hash())
+                                    } else {
+                                        return (Color32::RED, Color32::RED);
+                                    };
                                 (
-                                    //hashable_to_color(timestamp),
                                     hashable_to_color(membership_hash),
-                                    hashable_to_color(membership_hash),
+                                    hashable_to_color(origin_hash),
                                 )
                             })
                             .with_node_info_provider(&|ui, id| {
