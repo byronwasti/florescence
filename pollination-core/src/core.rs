@@ -567,6 +567,8 @@ where
     use ItcMapTree::*;
 
     match (own_map, peer_map) {
+        // TODO: Ideally own_map containing Unknown doesn't happen. More checks should be put in
+        // place to do that.
         (Unknown, Unknown) => PatchOutcome::default(),
         (Unknown, Leaf { id_tree, value, .. }) => PatchOutcome::new((*id_tree).clone(), value),
         (a @ Unknown, SubTree(l, r)) => {

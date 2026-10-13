@@ -22,6 +22,8 @@ fn test_case_1() {
 
     let msg = n.handle_message(m).expect("Message");
 
+    assert!(n.core_map().is_complete());
+
     info!("n_end: {n}");
     info!("msg_out: {msg}");
 
