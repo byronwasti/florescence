@@ -92,18 +92,19 @@ impl<'a> ForceGraphWidget<'a> {
 
         let mut interact = false;
         for (idx, node) in self.state.graph.inner_mut().node_weights_mut().enumerate() {
+            // TODO: Bring back interaction
             let point_rect = Rect::from_center_size(node.pos, vec2(20., 20.));
             let point_id = response.id.with(idx);
             let point_response = ui.interact(point_rect, point_id, Sense::drag());
-            node.pos += point_response.drag_delta();
+            //node.pos += point_response.drag_delta();
 
             if point_response.dragged() {
-                fixed.push(idx);
+                //fixed.push(idx);
                 self.state.open_node_windows.insert(NodeIndex::new(idx));
-                interact = true;
+                //interact = true;
             } else {
                 if point_response.drag_stopped() {
-                    interact = true;
+                    //interact = true;
                     //ui.ctx().clear_animations();
                 }
             }
