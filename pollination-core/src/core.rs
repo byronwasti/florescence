@@ -95,7 +95,7 @@ where
         self.own_info.timestamp += 1;
         let removals = self.insert(self.id.clone(), self.own_info().clone());
         for (id, data) in &removals {
-            info!("Removing {id} value={data}")
+            debug!("Removing {id} value={data}")
         }
         removals
     }
@@ -214,7 +214,14 @@ where
                 }
             }
         } else {
-            Some(self.request_membership_message())
+            // We only reject the patch when `Self` is overwritten. The membership_hash must be
+            // inequal, as we never have a ItcMap without ourselves in it
+            assert_ne!(message.membership_hash, self.membership_hash());
+            if message.membership_hash > self.membership_hash() {
+                Some(self.request_membership_message())
+            } else {
+                Some(self.full_update_message())
+            }
         }
     }
 
@@ -315,12 +322,12 @@ where
     #[tracing::instrument(skip_all)]
     fn apply_patch(&mut self, patch: Patch<NodeInfo<A>>) -> bool {
         let own_map_tree = self.core_map.to_itc_map_tree();
-        info!("Own map tree: {own_map_tree:?}");
-        info!("Peer Patch: {patch}");
+        debug!("Own map tree: {own_map_tree:?}");
+        debug!("Peer Patch: {patch}");
         let peer_map = ItcMap::from_patch(patch);
-        info!("Peer map: {peer_map}");
+        debug!("Peer map: {peer_map}");
         let peer_map_tree = peer_map.to_itc_map_tree();
-        info!("Peer map tree: {peer_map_tree:?}");
+        debug!("Peer map tree: {peer_map_tree:?}");
         let mut outcome = apply_patch(&own_map_tree, &peer_map_tree);
 
         let mut all_ids = IdTree::zero();
@@ -331,7 +338,7 @@ where
             .collect::<Vec<_>>();
 
         let overlap = inserts.iter().any(|(id, _)| {
-            info!("Comparing {id} with {}", self.id());
+            debug!("Comparing {id} with {}", self.id());
             id.overlaps(self.id())
         });
 
@@ -340,7 +347,7 @@ where
         }
 
         for (id, val) in inserts.drain(..) {
-            info!("Insert id={id} value={val}");
+            debug!("Insert id={id} value={val}");
             all_ids = all_ids.join(id.clone());
             self.core_map.insert_without_event(id, val.clone());
         }
@@ -403,19 +410,19 @@ where
     // information to the map.
     fn add_peers(&mut self, mut peers: Vec<NodeInfo<A>>) {
         info!("Adding {} peers: {peers:?}", peers.len());
-        info!("Starting id={} ts={}", self.id(), self.timestamp());
+        debug!("Starting id={} ts={}", self.id(), self.timestamp());
         let mut new_ids = self.id.clone().fork_many(peers.len() + 1);
         self.id = new_ids[0].clone();
         self.increment();
-        info!("new_id={} new_ts={}", self.id(), self.timestamp());
+        debug!("new_id={} new_ts={}", self.id(), self.timestamp());
         //self.insert(new_ids[0].clone(), self.own_info.clone());
 
         assert_eq!(new_ids.len(), peers.len() + 1);
 
         for (new_id, info) in new_ids.drain(1..).zip(peers.drain(..)) {
             let removals = self.insert(new_id.clone(), info);
-            info!("peer_id={new_id} new_ts={}", self.timestamp());
-            info!("Removing {} ids: {:?}", removals.len(), &removals);
+            debug!("peer_id={new_id} new_ts={}", self.timestamp());
+            debug!("Removing {} ids: {:?}", removals.len(), &removals);
             // There should be no removals, as inserting our own info should have removed ourselves
             // already.
             assert!(removals.is_empty());
@@ -527,6 +534,12 @@ struct PatchOutcome<'a, A> {
     insert: Vec<(IdTree, &'a NodeInfo<A>)>,
 }
 
+impl<'a, A> Default for PatchOutcome<'a, A> {
+    fn default() -> Self {
+        PatchOutcome { insert: vec![] }
+    }
+}
+
 impl<'a, A> PatchOutcome<'a, A> {
     fn new(id: IdTree, node_info: &'a NodeInfo<A>) -> Self {
         let insert = vec![(id, node_info)];
@@ -539,12 +552,6 @@ impl<'a, A> PatchOutcome<'a, A> {
     fn merge(mut self, mut other: PatchOutcome<'a, A>) -> Self {
         self.insert.append(&mut other.insert);
         self
-    }
-}
-
-impl<'a, A> Default for PatchOutcome<'a, A> {
-    fn default() -> Self {
-        PatchOutcome { insert: vec![] }
     }
 }
 
@@ -582,7 +589,7 @@ where
                 value: v1,
             },
         ) => {
-            info!("id0={id0} id1={id1} ts0={ts0} ts1={ts1} v0={v0:?} v1={v1:?}");
+            debug!("id0={id0} id1={id1} ts0={ts0} ts1={ts1} v0={v0:?} v1={v1:?}");
             match ts0.cmp(ts1) {
                 Ordering::Greater => {
                     info!("Self contains a greater timestamp, ignoring patch");
