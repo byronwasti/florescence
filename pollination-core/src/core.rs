@@ -194,8 +194,8 @@ where
             return self.handle_no_patch_message(message);
         };
 
-        match self.apply_patch(patch) {
-            Ok(()) => match self.timestamp().partial_cmp(&message.timestamp) {
+        if self.apply_patch(patch) {
+            match self.timestamp().partial_cmp(&message.timestamp) {
                 Some(Ordering::Greater) | None => Some(self.update_message(&message.timestamp)),
                 Some(Ordering::Equal) => {
                     if self.membership_hash() != message.membership_hash {
@@ -212,8 +212,9 @@ where
                     );
                     panic!("Timestamp is less than message timestamp; patch was incomplete");
                 }
-            },
-            Err(corrupt_id) => Some(self.corrupt_id_message(corrupt_id)),
+            }
+        } else {
+            Some(self.request_membership_message())
         }
     }
 
@@ -312,7 +313,7 @@ where
     /** Misc. Helper methods **/
 
     #[tracing::instrument(skip_all)]
-    fn apply_patch(&mut self, patch: Patch<NodeInfo<A>>) -> std::result::Result<(), IdTree> {
+    fn apply_patch(&mut self, patch: Patch<NodeInfo<A>>) -> bool {
         let own_map_tree = self.core_map.to_itc_map_tree();
         info!("Own map tree: {own_map_tree:?}");
         info!("Peer Patch: {patch}");
@@ -321,12 +322,6 @@ where
         let peer_map_tree = peer_map.to_itc_map_tree();
         info!("Peer map tree: {peer_map_tree:?}");
         let mut outcome = apply_patch(&own_map_tree, &peer_map_tree);
-        let corrupt_id = outcome.corrupt_id.take();
-
-        if let Some(corrupt_id) = corrupt_id {
-            warn!("Corrupt ID in patch application; Skipping entire update");
-            return Err(corrupt_id);
-        }
 
         let mut all_ids = IdTree::zero();
         let mut inserts = outcome
@@ -334,6 +329,16 @@ where
             .drain(..)
             .map(|(id, val)| (id, val.clone()))
             .collect::<Vec<_>>();
+
+        let overlap = inserts.iter().any(|(id, _)| {
+            info!("Comparing {id} with {}", self.id());
+            id.overlaps(self.id())
+        });
+
+        if overlap {
+            return false;
+        }
+
         for (id, val) in inserts.drain(..) {
             info!("Insert id={id} value={val}");
             all_ids = all_ids.join(id.clone());
@@ -354,7 +359,8 @@ where
         if !self.core_map.is_complete() {
             error!("Core_map is incomplete after patch; will crash");
         }
-        Ok(())
+
+        true
     }
 
     /// Returns whether or not peers were added
@@ -519,8 +525,6 @@ fn find_first_valid_id<A>(map: &ItcMap<NodeInfo<A>>, uuid: Uuid) -> Option<IdTre
 #[derive(Clone, Debug, PartialEq)]
 struct PatchOutcome<'a, A> {
     insert: Vec<(IdTree, &'a NodeInfo<A>)>,
-    // NOTE: This is a "compound" ID, not an Ideal IDTree
-    corrupt_id: Option<IdTree>,
 }
 
 impl<'a, A> PatchOutcome<'a, A> {
@@ -532,32 +536,15 @@ impl<'a, A> PatchOutcome<'a, A> {
         }
     }
 
-    fn corrupt(id: IdTree) -> Self {
-        PatchOutcome {
-            corrupt_id: Some(id),
-            ..Default::default()
-        }
-    }
-
     fn merge(mut self, mut other: PatchOutcome<'a, A>) -> Self {
         self.insert.append(&mut other.insert);
-        self.corrupt_id = match (self.corrupt_id, other.corrupt_id) {
-            (None, None) => None,
-            (Some(v0), None) => Some(v0),
-            (None, Some(v1)) => Some(v1),
-            (Some(v0), Some(v1)) => Some(v0.join(v1)),
-        };
-
         self
     }
 }
 
 impl<'a, A> Default for PatchOutcome<'a, A> {
     fn default() -> Self {
-        PatchOutcome {
-            insert: vec![],
-            corrupt_id: None,
-        }
+        PatchOutcome { insert: vec![] }
     }
 }
 
@@ -632,44 +619,14 @@ where
             let l = apply_patch(a, l);
             let r = apply_patch(a, r);
 
-            let outcome = l.merge(r);
-
-            if outcome.corrupt_id.is_some() {
-                PatchOutcome::corrupt((*id_tree).clone())
-            } else if !outcome.insert.is_empty() {
-                let updated_id_tree = outcome
-                    .insert
-                    .iter()
-                    .fold(IdTree::zero(), |acc, (id, _)| acc.join(id.clone()));
-
-                // Either we have updates for everything, or we don't
-                // TODO: This check doesn't work; we need to keep track of where we're at in the
-                // tree for this to work properly
-                /*
-                if updated_id_tree != **id_tree {
-                    warn!("Corrupt patch at {id_tree}, only updated {updated_id_tree}");
-                    PatchOutcome::corrupt((*id_tree).clone())
-                } else {
-                    outcome
-                }
-                */
-                outcome
-            } else {
-                outcome
-            }
+            l.merge(r)
         }
 
         (SubTree(l, r), b @ Leaf { id_tree, .. }) => {
             let l = apply_patch(l, b);
             let r = apply_patch(r, b);
 
-            if l != r {
-                // If the Leaf doesn't subsume all our data, then we're corrupt here
-                warn!("Corrupt patch at {id_tree}");
-                PatchOutcome::corrupt((*id_tree).clone())
-            } else {
-                l
-            }
+            l.merge(r)
         }
 
         (SubTree(l0, r0), SubTree(l1, r1)) => {

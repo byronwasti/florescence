@@ -754,9 +754,9 @@ dependencies = [
 
 [[package]]
 name = "treeclocks"
-version = "0.10.2"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aeb864abe69146f824a12ff2620f94f2022eaf00baaf9fc7dc2a68452ecf5f9f"
+checksum = "280bb0b22b32d9df62a195c62964e4bc5b67f93222f6898238a8a563127f6c07"
 dependencies = [
  "serde",
  "thiserror",
