@@ -3,32 +3,27 @@ use tracing::info;
 
 #[test]
 fn test_case_1() {
-    tracing_subscriber::fmt().with_test_writer().try_init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_test_writer()
+        .try_init();
     let mut n: PollinationCore<u64> =
-        serde_json::from_str(include_str!("tc2_core.json")).expect("Unparseable");
+        serde_json::from_str(include_str!("tc2_node.json")).expect("Unparseable");
     let n0 = n.clone();
 
     let mut m: PollinationMessage<u64> =
         serde_json::from_str(include_str!("tc2_msg.json")).expect("Unparseable");
 
-    info!("n_start: {n0}");
-    info!("m_in: {m}");
+    info!("{}", n.id());
 
     n.recycle();
 
-    info!("N after recycling: {n}");
-
-    info!("Map after recycling: {}", n.core_map());
+    info!("{}", n.id());
 
     let msg = n.handle_message(m).expect("Message");
 
     assert!(n.core_map().is_complete());
 
-    info!("n_end: {n}");
-    info!("msg_out: {msg}");
-
     let t0 = n0.timestamp();
     let t = n.timestamp();
-    info!("t - t0 = {}", t.clone().diff(t0));
-    info!("t0 - t1 = {}", t0.clone().diff(t));
 }
