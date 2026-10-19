@@ -142,7 +142,7 @@ impl<'a> ForceGraphWidget<'a> {
             };
 
             painter.add(Shape::circle_filled(pos_map[idx], 15., ring_color));
-            painter.add(Shape::circle_filled(pos_map[idx], 13., node_color));
+            painter.add(Shape::circle_filled(pos_map[idx], 10., node_color));
             painter.text(
                 pos_map[idx],
                 egui::Align2::CENTER_CENTER,
