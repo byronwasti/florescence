@@ -1,6 +1,6 @@
-mod simulator;
+mod tab_simulator;
 
-pub use simulator::SimulatorApp;
+pub use tab_simulator::SimulatorApp;
 
 pub trait SubApp {
     fn name(&self) -> &'static str;
