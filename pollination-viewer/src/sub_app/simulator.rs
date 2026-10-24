@@ -16,7 +16,7 @@ use pollination_simulation::{
 use pollination_simulator::{Config, Mail, NodeIndex, Sim, SimNode, history::HistoricalRecord};
 use std::{
     collections::{HashMap, HashSet, hash_map::DefaultHasher},
-    hash::{Hash, Hasher},
+    hash::{Hash, Hasher as _},
 };
 
 const STORAGE_KEY: &str = "tab.simulator";
@@ -41,7 +41,7 @@ struct DurableState {
 }
 
 impl Default for DurableState {
-    fn default() -> DurableState {
+    fn default() -> Self {
         Self {
             step_count: 1,
             convergence_step_count: 100,
@@ -128,9 +128,7 @@ impl SubApp for SimulatorApp {
 impl SimulatorApp {
     pub fn new(storage: Option<&dyn eframe::Storage>) -> Self {
         let saved = storage
-            .and_then(|storage| {
-                eframe::get_value(storage, STORAGE_KEY)
-            })
+            .and_then(|storage| eframe::get_value(storage, STORAGE_KEY))
             .unwrap_or_default();
 
         Self {
@@ -225,7 +223,7 @@ impl SimulatorApp {
                                         let msg = record.msg_in.as_ref().expect("Some message");
                                         format!("from={:?}", msg.from)
                                     } else {
-                                        "".to_string()
+                                        String::new()
                                     };
 
                                     // TODO: Move this into the historical record, this is a silly thing
@@ -248,8 +246,8 @@ impl SimulatorApp {
                                                 draw_mail(ui, record.msg_in.as_ref());
                                             });
                                             ui.collapsing("Msgs Out", |ui| {
-                                                for (node_idx, msg) in record.msgs_out.iter() {
-                                                    ui.label(format!("For {:?}", node_idx));
+                                                for (node_idx, msg) in &record.msgs_out {
+                                                    ui.label(format!("For {node_idx:?}"));
                                                     draw_msg(ui, msg);
                                                 }
                                             });
@@ -388,13 +386,10 @@ impl SimulatorApp {
 
     fn draw_scene_stats(&self, ui: &mut Ui) {
         Frame::group(ui.style()).show(ui, |ui| {
-            ui.label(format!(
-                "Seconds since start: {:.3}s",
-                &ui.input(|i| i.time)
-            ));
-            ui.label(format!("Rect: {:#?}", &self.e.scene));
-            ui.label(format!("Event Time: {:#?}", &self.e.sim.history.time()));
-            ui.label(format!("Wall Time: {:#?}", &self.e.sim.history.wall_time()));
+            ui.label(format!("Seconds since start: {:.3}s", ui.input(|i| i.time)));
+            ui.label(format!("Rect: {:#?}", self.e.scene));
+            ui.label(format!("Event Time: {:#?}", self.e.sim.history.time()));
+            ui.label(format!("Wall Time: {:#?}", self.e.sim.history.wall_time()));
             ui.shrink_width_to_current();
         });
     }
@@ -439,7 +434,7 @@ impl<U> Cached<U> {
             self.inner = Some(getter());
         }
 
-        self.inner.as_ref().unwrap()
+        self.inner.as_ref().expect("cached value doesn't exist")
     }
 }
 
@@ -454,7 +449,7 @@ fn draw_sim_node_info(ui: &mut Ui, node: &SimNode<SimulatedPollinationCore>) {
             ui.collapsing("State", |ui| {
                 let Some(node) = node.inner() else { return };
                 let node = node.inner();
-                draw_core_info(ui, &node);
+                draw_core_info(ui, node);
             });
 
             ui.collapsing("Mailbox", |ui| {
@@ -476,7 +471,7 @@ fn draw_core_info(ui: &mut Ui, node: &PollinationCore<NodeIndex>) {
     draw_node_mapping(ui, node.core_map());
     let json = serde_json::to_string(node).expect("Unable to serialize core");
     ui.collapsing("json", |ui| {
-        ui.label(format!("{json}"));
+        ui.label(json.clone());
     });
     if ui.button("Copy node json to Clipboard").clicked() {
         ui.copy_text(json);
@@ -501,23 +496,23 @@ fn draw_mail(ui: &mut egui::Ui, msg: Option<&Mail<PollinationMessage<NodeIndex>>
         return;
     };
 
-    ui.label(format!("From: {:?}", &msg.from));
+    ui.label(format!("From: {:?}", msg.from));
     draw_msg(ui, &msg.msg);
 
     ui.collapsing("struct", |ui| {
-        ui.label(format!("{:?} => {}", &msg.from, &msg.msg));
+        ui.label(format!("{:?} => {}", msg.from, msg.msg));
     });
 }
 
 fn draw_msg(ui: &mut egui::Ui, msg: &PollinationMessage<NodeIndex>) {
-    ui.label(format!("Uuid: {}", &msg.uuid));
-    ui.label(format!("IdTree: {}", &msg.id));
-    ui.label(format!("Timestamp: {}", &msg.timestamp));
-    ui.label(format!("Origin Hash: {:?}", &msg.origin_hash));
-    ui.label(format!("Membership Hash: {:?}", &msg.membership_hash));
-    ui.label(format!("Unique Count: {}", &msg.unique_count));
-    ui.label(format!("new_membership: {:?}", &msg.new_membership));
-    ui.label(format!("full_patch: {}", &msg.full_patch));
+    ui.label(format!("Uuid: {}", msg.uuid));
+    ui.label(format!("IdTree: {}", msg.id));
+    ui.label(format!("Timestamp: {}", msg.timestamp));
+    ui.label(format!("Origin Hash: {:?}", msg.origin_hash));
+    ui.label(format!("Membership Hash: {:?}", msg.membership_hash));
+    ui.label(format!("Unique Count: {}", msg.unique_count));
+    ui.label(format!("new_membership: {:?}", msg.new_membership));
+    ui.label(format!("full_patch: {}", msg.full_patch));
 
     if let Some(patch) = &msg.patch {
         let map = ItcMap::from_patch(patch.clone());
@@ -616,10 +611,7 @@ fn draw_membership_hash_distribution_plot(
         })
         .show(ui, |plot_ui| {
             for hash in hashes {
-                let points: Vec<[f64; 2]> = series[&hash]
-                    .iter()
-                    .map(|&(time, count)| [time, count])
-                    .collect();
+                let points: Vec<[f64; 2]> = series[&hash].iter().map(|&p| p.into()).collect();
                 let line = Line::new(format!("{hash}"), PlotPoints::new(points))
                     .color(hashable_to_color(hash));
                 plot_ui.line(line);
@@ -709,10 +701,7 @@ fn draw_origin_hash_distribution_plot(
         })
         .show(ui, |plot_ui| {
             for hash in hashes {
-                let points: Vec<[f64; 2]> = series[&hash]
-                    .iter()
-                    .map(|&(time, count)| [time, count])
-                    .collect();
+                let points: Vec<[f64; 2]> = series[&hash].iter().map(|&p| p.into()).collect();
                 let line = Line::new(format!("{hash}"), PlotPoints::new(points))
                     .color(hashable_to_color(hash));
                 plot_ui.line(line);

@@ -4,7 +4,7 @@
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
-    let _subscriber = tracing_subscriber::FmtSubscriber::builder()
+    tracing_subscriber::FmtSubscriber::builder()
         .with_line_number(true)
         //.with_max_level(tracing::Level::DEBUG)
         //.with_env_filter("info,pollination_viewer=debug,pollination_core=debug")

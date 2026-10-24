@@ -3,9 +3,9 @@ use fjadra::{Center, Link, ManyBody, Node as FNode, SimulationBuilder};
 use petgraph::{
     dot::Dot,
     stable_graph::{NodeIndex, StableGraph as Graph},
-    visit::{EdgeRef, IntoEdgeReferences},
+    visit::{EdgeRef as _, IntoEdgeReferences as _},
 };
-use rand::{Rng, RngExt};
+use rand::RngExt as _;
 
 #[derive(Debug, Default)]
 pub struct Node {
@@ -64,13 +64,13 @@ impl ForceGraph {
         &mut self.inner
     }
 
-    pub fn random() -> ForceGraph {
+    pub fn random() -> Self {
         let mut g = Graph::<Node, i32>::new();
 
         let count = 100;
 
         for i in 0..count {
-            let _ = g.add_node(Node {
+            g.add_node(Node {
                 id: i,
                 pos: pos2(0., 0.),
             });
@@ -84,17 +84,17 @@ impl ForceGraph {
                 let j = rng.random_range(0..count - 1);
                 let j = if j >= i { j + 1 } else { j };
 
-                g.extend_with_edges(&[(i as u32, j as u32)]);
+                g.extend_with_edges([(i as u32, j as u32)]);
             }
         }
 
         let dot = Dot::new(&g);
-        std::fs::write("graph.dot", format!("{:?}", dot)).unwrap();
+        std::fs::write("graph.dot", format!("{dot:?}")).expect("unable to write to disk");
 
-        ForceGraph::from_inner(g)
+        Self::from_inner(g)
     }
 
-    pub fn k_graph(k: usize) -> ForceGraph {
+    pub fn k_graph(k: usize) -> Self {
         let mut g = Graph::<Node, i32>::new();
 
         let mut rng = rand::rng();
@@ -111,11 +111,11 @@ impl ForceGraph {
                     continue;
                 }
 
-                g.extend_with_edges(&[(i as u32, j as u32)]);
+                g.extend_with_edges([(i as u32, j as u32)]);
             }
         }
 
-        ForceGraph::from_inner(g)
+        Self::from_inner(g)
     }
 
     pub fn run_force_simulation(&mut self, config: &super::ForceGraphConfig, fixed: &[usize]) {
@@ -150,7 +150,6 @@ impl ForceGraph {
         let edges = g
             .edge_references()
             .clone()
-            .into_iter()
             .map(|e| (e.source().index(), e.target().index(), *e.weight()));
 
         // This feels like it could be more efficient
@@ -175,7 +174,7 @@ impl ForceGraph {
         let positions = sim.iter().last().expect("Sim should always return");
 
         for (idx, node) in g.node_weights_mut().enumerate() {
-            node.pos = pos2(positions[idx][0] as f32, positions[idx][1] as f32)
+            node.pos = pos2(positions[idx][0] as f32, positions[idx][1] as f32);
         }
 
         self.state.first = false;

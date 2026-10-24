@@ -1,9 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{
-    cmp::Ordering,
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-};
+use std::{cmp::Ordering, collections::HashSet, fmt::Debug};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 use treeclocks::{EventTree, IdTree, ItcMap, Patch, itc_map::ItcMapTree};
@@ -86,7 +82,7 @@ where
     /// Increment the logical timestamp associated with this nodes data.
     #[tracing::instrument(skip_all)]
     pub fn increment(&mut self) {
-        let removals = self.increment_inner();
+        let _removals = self.increment_inner();
 
         //assert_eq!(removals.len(), 1);
     }
@@ -115,7 +111,7 @@ where
     pub fn heartbeat_message(&self) -> PollinationMessage<A> {
         info!("Heartbeat message");
         PollinationMessage {
-            uuid: self.own_info.uuid.clone(),
+            uuid: self.own_info.uuid,
             id: self.id.clone(),
             timestamp: self.core_map.timestamp().clone(),
             origin_hash: self.origin_hash(),
@@ -141,14 +137,6 @@ where
         info!("Full update message");
         let mut msg = self.update_message(&EventTree::new());
         msg.full_patch = true;
-        msg
-    }
-
-    #[tracing::instrument(skip_all, fields(corrupt_id))]
-    fn corrupt_id_message(&self, corrupt_id: IdTree) -> PollinationMessage<A> {
-        // TODO: This should probably be an update_message
-        let mut msg = self.heartbeat_message();
-        msg.timestamp = msg.timestamp.mask_out(&corrupt_id);
         msg
     }
 
@@ -243,7 +231,7 @@ where
                 Some(self.heartbeat_message())
             }
             Some(Ordering::Equal) => {
-                if &self.membership_hash() != &message.membership_hash {
+                if self.membership_hash() != message.membership_hash {
                     // We know there is a skew; send all the information we know.
                     Some(self.full_update_message())
                 } else {
@@ -373,7 +361,7 @@ where
         }
 
         let new_timestamp = self.timestamp().clone().join(peer_map.timestamp().clone());
-        let new_ts_diff = new_timestamp.clone().diff(&self.timestamp());
+        let new_ts_diff = new_timestamp.clone().diff(self.timestamp());
         if all_ids != IdTree::zero() && !new_ts_diff.contains(&all_ids) {
             // TODO: This maybe should be a panic?
             // XXX: I feel like this should panic
@@ -449,7 +437,7 @@ where
         }
     }
 
-    /** Recycling **/
+    /* Recycling */
 
     pub fn recycle(&mut self) -> bool {
         self.recycle_duplicate_self();
@@ -533,7 +521,7 @@ impl<A: std::fmt::Debug> std::fmt::Display for PollinationCore<A> {
             self.own_info.addr,
             self.own_info.uuid,
             self.core_map.timestamp(),
-            &self.id,
+            self.id,
             self.membership_hash(),
             map,
         )
@@ -563,10 +551,7 @@ impl<'a, A> Default for PatchOutcome<'a, A> {
 impl<'a, A> PatchOutcome<'a, A> {
     fn new(id: IdTree, node_info: &'a NodeInfo<A>) -> Self {
         let insert = vec![(id, node_info)];
-        PatchOutcome {
-            insert,
-            ..Default::default()
-        }
+        PatchOutcome { insert }
     }
 
     fn merge(mut self, mut other: PatchOutcome<'a, A>) -> Self {
@@ -592,8 +577,8 @@ where
         (a @ Unknown, SubTree(l, r)) => {
             let l = apply_patch(a, l);
             let r = apply_patch(a, r);
-            let outcome = l.merge(r);
-            outcome
+
+            l.merge(r)
         }
         (_, Unknown) => PatchOutcome::default(),
 
@@ -642,14 +627,14 @@ where
             }
         }
 
-        (a @ Leaf { id_tree, .. }, SubTree(l, r)) => {
+        (a @ Leaf { .. }, SubTree(l, r)) => {
             let l = apply_patch(a, l);
             let r = apply_patch(a, r);
 
             l.merge(r)
         }
 
-        (SubTree(l, r), b @ Leaf { id_tree, .. }) => {
+        (SubTree(l, r), b @ Leaf { .. }) => {
             let l = apply_patch(l, b);
             let r = apply_patch(r, b);
 

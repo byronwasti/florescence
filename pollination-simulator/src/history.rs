@@ -33,6 +33,10 @@ impl<S: Simulee> History<S> {
         self.records.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
+    }
+
     pub fn records_iter(&self) -> impl Iterator<Item = &HistoricalRecord<S>> {
         self.records.iter()
     }

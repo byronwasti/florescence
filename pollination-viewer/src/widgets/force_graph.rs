@@ -34,6 +34,7 @@ pub struct ForceGraphWidget<'a> {
     state: &'a mut ForceGraphState,
     node_color_provider: Option<&'a dyn Fn(u32) -> (Color32, Color32)>,
     edge_color_provider: Option<&'a dyn Fn(u32, u32) -> Color32>,
+    #[expect(clippy::type_complexity)]
     info_provider: Option<&'a dyn Fn(&mut egui::Ui, NodeIndex)>,
 }
 
@@ -53,7 +54,7 @@ impl Widget for ForceGraphWidget<'_> {
 }
 
 impl<'a> ForceGraphWidget<'a> {
-    pub fn new(state: &'a mut ForceGraphState) -> ForceGraphWidget<'a> {
+    pub fn new(state: &'a mut ForceGraphState) -> Self {
         Self {
             state,
             node_color_provider: None,
@@ -86,11 +87,11 @@ impl<'a> ForceGraphWidget<'a> {
         self
     }
 
-    fn position_map(&mut self, ui: &mut Ui, response: &Response) -> (Vec<Pos2>, Vec<usize>) {
+    fn position_map(&mut self, ui: &Ui, response: &Response) -> (Vec<Pos2>, Vec<usize>) {
         let mut out = vec![];
-        let mut fixed = vec![];
+        let fixed = vec![];
 
-        let mut interact = false;
+        let interact = false;
         for (idx, node) in self.state.graph.inner_mut().node_weights_mut().enumerate() {
             // TODO: Bring back interaction
             let point_rect = Rect::from_center_size(node.pos, vec2(20., 20.));
@@ -109,7 +110,7 @@ impl<'a> ForceGraphWidget<'a> {
                 }
             }
 
-            out.push(node.pos)
+            out.push(node.pos);
         }
 
         self.state.graph.state.interact = interact;
@@ -120,7 +121,12 @@ impl<'a> ForceGraphWidget<'a> {
     fn draw_graph(&self, _ui: &mut Ui, painter: &Painter, _response: &Response, pos_map: &[Pos2]) {
         for node in self.state.graph.inner().node_weights() {
             for neighbor in self.state.graph.inner().neighbors((node.id as u32).into()) {
-                let neighbor = self.state.graph.inner().node_weight(neighbor).unwrap();
+                let neighbor = self
+                    .state
+                    .graph
+                    .inner()
+                    .node_weight(neighbor)
+                    .expect("unable to get neighbor weight");
 
                 let color = if let Some(edge_color_fn) = &self.edge_color_provider {
                     edge_color_fn(node.id as u32, neighbor.id as u32)
@@ -159,10 +165,11 @@ impl<'a> ForceGraphWidget<'a> {
         };
 
         let mut remove_id = None;
-        for node_idx in self.state.open_node_windows.iter() {
+        #[expect(clippy::iter_over_hash_type)]
+        for node_idx in &self.state.open_node_windows {
             egui::Window::new(format!("Node {}", node_idx.index())).show(ui, |ui| {
                 if ui.button("Close").clicked() {
-                    remove_id = Some(*node_idx)
+                    remove_id = Some(*node_idx);
                 }
 
                 info_provider(ui, *node_idx);
@@ -180,7 +187,7 @@ pub struct ForceGraphSettingsWidget<'a> {
 }
 
 impl<'a> ForceGraphSettingsWidget<'a> {
-    pub fn new(config: &'a mut ForceGraphConfig) -> ForceGraphSettingsWidget<'a> {
+    pub fn new(config: &'a mut ForceGraphConfig) -> Self {
         Self { config }
     }
 }

@@ -19,13 +19,13 @@ fn recycle_ids_recurse(own: IdTree, dead_peers: IdTree) -> IdReclaimTree {
             // HIT
             error!("Logic bug");
             panic!("Logic bug");
-            IdReclaimTree::One
+            //IdReclaimTree::One
         }
         (SubTree(..), One) => {
             // HIT
-            panic!("Logic bug");
             error!("Logic bug");
-            IdReclaimTree::One
+            panic!("Logic bug");
+            //IdReclaimTree::One
         }
         (SubTree(l, r), Zero) => {
             let l = recycle_ids_recurse(*l, Zero);

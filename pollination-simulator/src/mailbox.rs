@@ -1,6 +1,5 @@
 use petgraph::graph::NodeIndex;
-use rand::{Rng, RngExt};
-use std::{cmp::Ordering, collections::VecDeque};
+use std::collections::VecDeque;
 
 #[derive(Debug, Default)]
 pub struct Mailbox<Message> {

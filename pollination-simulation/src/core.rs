@@ -88,7 +88,7 @@ impl Simulee for SimulatedPollinationCore {
 
                 Some((PollinationEvent::Heartbeat, msgs))
             }
-            _StepOptionHandleMessage => {
+            StepOptions::HandleMessage => {
                 let mail = delivery.as_mut()?.take();
                 let from = mail.from;
                 let msg = mail.msg;

@@ -1,5 +1,5 @@
 use petgraph::{graph::NodeIndex, stable_graph::StableGraph};
-use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
+use rand::{Rng, SeedableRng, seq::SliceRandom};
 use rand_chacha::ChaCha12Rng;
 use thiserror::Error;
 
