@@ -1,4 +1,4 @@
-use pollination::core::{PollinationCore, PollinationMessage};
+use pollination::{PollinationCore, PollinationMessage};
 use tracing::info;
 
 #[test]

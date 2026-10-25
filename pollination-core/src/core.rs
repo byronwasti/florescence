@@ -1,8 +1,13 @@
+use crate::{
+    membership_hash::MembershipHash,
+    message::PollinationMessage,
+    node_info::{NodeInfo, NodeStatus},
+    origin_hash::OriginHash,
+};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::HashSet, fmt::Debug};
-use thiserror::Error;
 use tracing::{debug, error, info, warn};
-use treeclocks::{EventTree, IdTree, ItcMap, Patch, itc_map::ItcMapTree};
+use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -319,7 +324,7 @@ where
         debug!("Peer map: {peer_map}");
         let peer_map_tree = peer_map.to_itc_map_tree();
         debug!("Peer map tree: {peer_map_tree:?}");
-        let mut outcome = apply_patch(&own_map_tree, &peer_map_tree);
+        let mut outcome = crate::apply_patch::apply_patch(&own_map_tree, &peer_map_tree);
 
         let mut all_ids = IdTree::zero();
         let mut inserts = outcome
@@ -537,282 +542,10 @@ fn find_first_valid_id<A>(map: &ItcMap<NodeInfo<A>>, uuid: Uuid) -> Option<IdTre
         .cloned()
 }
 
-#[derive(Clone, Debug, PartialEq)]
-struct PatchOutcome<'a, A> {
-    insert: Vec<(IdTree, &'a NodeInfo<A>)>,
-}
-
-impl<'a, A> Default for PatchOutcome<'a, A> {
-    fn default() -> Self {
-        PatchOutcome { insert: vec![] }
-    }
-}
-
-impl<'a, A> PatchOutcome<'a, A> {
-    fn new(id: IdTree, node_info: &'a NodeInfo<A>) -> Self {
-        let insert = vec![(id, node_info)];
-        PatchOutcome { insert }
-    }
-
-    fn merge(mut self, mut other: PatchOutcome<'a, A>) -> Self {
-        self.insert.append(&mut other.insert);
-        self
-    }
-}
-
-fn apply_patch<'a, A>(
-    own_map: &'a ItcMapTree<NodeInfo<A>>,
-    peer_map: &'a ItcMapTree<NodeInfo<A>>,
-) -> PatchOutcome<'a, A>
-where
-    A: PartialEq + Debug,
-{
-    use ItcMapTree::*;
-
-    match (own_map, peer_map) {
-        // TODO: Ideally own_map containing Unknown doesn't happen. More checks should be put in
-        // place to do that.
-        (Unknown, Unknown) => PatchOutcome::default(),
-        (Unknown, Leaf { id_tree, value, .. }) => PatchOutcome::new((*id_tree).clone(), value),
-        (a @ Unknown, SubTree(l, r)) => {
-            let l = apply_patch(a, l);
-            let r = apply_patch(a, r);
-
-            l.merge(r)
-        }
-        (_, Unknown) => PatchOutcome::default(),
-
-        (
-            Leaf {
-                id_tree: id0,
-                timestamp: ts0,
-                value: v0,
-            },
-            Leaf {
-                id_tree: id1,
-                timestamp: ts1,
-                value: v1,
-            },
-        ) => {
-            debug!("id0={id0} id1={id1} ts0={ts0} ts1={ts1} v0={v0:?} v1={v1:?}");
-            match ts0.cmp(ts1) {
-                Ordering::Greater => {
-                    info!("Self contains a greater timestamp, ignoring patch");
-                    PatchOutcome::default()
-                }
-                Ordering::Less => PatchOutcome::new((*id1).clone(), v1),
-                Ordering::Equal => {
-                    if v0.uuid != v1.uuid {
-                        // Panicking for now because we don't have removal of peers yet, so this
-                        // should never happen. In the future we just take the greater
-                        warn!(
-                            "UUID skew between equal peers. Indicates a partition event occurred. {} != {}",
-                            v0.uuid, v1.uuid,
-                        );
-                        // TODO: UGH this stuff is hard
-                        //panic!("TODO: Remove panic");
-                        if v1.uuid > v0.uuid {
-                            PatchOutcome::new((*id1).clone(), v1)
-                        } else {
-                            PatchOutcome::default()
-                        }
-                    } else {
-                        // TODO: Both of these asserts _should_ apply, but unfortunately
-                        // don't during convergence. Need to figure out a way to make them work.
-                        //assert_eq!(id0, id1);
-                        //assert_eq!(v0, v1);
-                        PatchOutcome::default()
-                    }
-                }
-            }
-        }
-
-        (a @ Leaf { .. }, SubTree(l, r)) => {
-            let l = apply_patch(a, l);
-            let r = apply_patch(a, r);
-
-            l.merge(r)
-        }
-
-        (SubTree(l, r), b @ Leaf { .. }) => {
-            let l = apply_patch(l, b);
-            let r = apply_patch(r, b);
-
-            l.merge(r)
-        }
-
-        (SubTree(l0, r0), SubTree(l1, r1)) => {
-            let l = apply_patch(l0, l1);
-            let r = apply_patch(r0, r1);
-            l.merge(r)
-        }
-    }
-}
-
-// PollinationMessage
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PollinationMessage<A> {
-    pub uuid: Uuid,
-    pub id: IdTree,
-    pub timestamp: EventTree,
-    pub origin_hash: OriginHash,
-    pub membership_hash: MembershipHash,
-    pub unique_count: usize,
-    pub patch: Option<Patch<NodeInfo<A>>>,
-    pub new_membership: bool,
-    // TODO: Derive from Patch
-    pub full_patch: bool,
-}
-
-impl<A: std::fmt::Debug> std::fmt::Display for PollinationMessage<A> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        write!(
-            f,
-            "PollinationMessage {{ uuid={} id={} timestamp={} origin_hash={} membership_hash={} unique_count={} new_membership={:?} full={} patch={} }}",
-            self.uuid,
-            self.id,
-            self.timestamp,
-            self.origin_hash.0,
-            self.membership_hash.0,
-            self.unique_count,
-            self.new_membership,
-            self.full_patch,
-            if let Some(patch) = &self.patch {
-                format!("{patch}")
-            } else {
-                "None".to_string()
-            },
-        )
-    }
-}
-
-// Error & Result
-
-#[derive(Debug, Error)]
-pub enum PollinationError {
-    #[error("No patch present when one was expected")]
-    NoPatch,
-
-    #[error("No self present in the ItcMap")]
-    NoSelf,
-}
-
-pub type Result<T> = std::result::Result<T, PollinationError>;
-
-// NodeInfo
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct NodeInfo<A> {
-    uuid: Uuid,
-    addr: A,
-    timestamp: u64,
-    status: NodeStatus,
-}
-
-impl<A> NodeInfo<A> {
-    pub fn new(uuid: Uuid, addr: A) -> Self {
-        NodeInfo {
-            uuid,
-            addr,
-            timestamp: 1,
-            status: NodeStatus::Healthy,
-        }
-    }
-}
-
-impl<A: std::fmt::Debug> std::fmt::Display for NodeInfo<A> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        write!(
-            f,
-            "{{ {:?}::{} timestamp={} status={:?} }}",
-            self.addr, self.uuid, self.timestamp, self.status
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-enum NodeStatus {
-    Healthy,
-    Dead,
-}
-
-// MembershipHash
-
-use simplehash::fnv1a_64;
-
-#[derive(
-    PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy, Serialize, Deserialize, Hash, Default,
-)]
-pub struct MembershipHash(u64);
-
-impl MembershipHash {
-    fn from_itc_map<A>(itc_map: &ItcMap<NodeInfo<A>>) -> Self {
-        itc_map.fold_recursive(
-            &|node: &NodeInfo<A>| Self::hash(node.uuid.as_bytes()),
-            &|l, r| Self::combine(l, r),
-        )
-    }
-
-    fn hash(bytes: &[u8]) -> Self {
-        Self(fnv1a_64(bytes))
-    }
-
-    fn combine(left: MembershipHash, right: MembershipHash) -> Self {
-        let mut bytes = [0u8; 16];
-        bytes[..8].copy_from_slice(&left.0.to_le_bytes());
-        bytes[8..].copy_from_slice(&right.0.to_le_bytes());
-        Self(fnv1a_64(&bytes))
-    }
-
-    pub fn u64(&self) -> u64 {
-        self.0
-    }
-}
-
-#[derive(
-    PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy, Serialize, Deserialize, Hash, Default,
-)]
-pub struct OriginHash(u64);
-
-impl OriginHash {
-    fn from_membership_hash(mh: MembershipHash) -> Self {
-        Self(mh.0)
-    }
-
-    pub fn u64(&self) -> u64 {
-        self.0
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use uuid::uuid;
-
-    #[test]
-    fn test_membership_hashing() {
-        let mut m0 = ItcMap::new();
-        let mut m1 = ItcMap::new();
-
-        let mut i0 = IdTree::one();
-        let (i0, i1) = i0.fork();
-
-        let n0: NodeInfo<_> = NodeInfo::new(Uuid::from_u128(1030), 0);
-        let n1: NodeInfo<_> = NodeInfo::new(Uuid::from_u128(2313), 1);
-
-        m0.insert(i0.clone(), n0.clone());
-        m0.insert(i1.clone(), n1.clone());
-
-        // Different tree
-        m1.insert(i1.clone(), n0.clone());
-        m1.insert(i0.clone(), n1.clone());
-
-        let h0 = MembershipHash::from_itc_map(&m0);
-        let h1 = MembershipHash::from_itc_map(&m1);
-
-        assert_ne!(h0, h1);
-    }
 
     #[test]
     fn test_basic_sync_0() {
