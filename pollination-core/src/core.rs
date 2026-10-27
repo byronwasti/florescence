@@ -5,7 +5,11 @@ use crate::{
     origin_hash::OriginHash,
 };
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, collections::HashSet, fmt::Debug};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+};
 use tracing::{debug, error, info, warn};
 use treeclocks::{EventTree, IdTree, ItcMap, Patch};
 use uuid::Uuid;
@@ -17,6 +21,8 @@ pub struct PollinationCore<A> {
     core_map: ItcMap<NodeInfo<A>>,
     origin_hash: OriginHash,
     own_info: NodeInfo<A>,
+    // TODO: This is pretty gross, but necessary
+    prev_store: HashMap<OriginHash, (IdTree, u64)>,
 }
 
 impl<A> PollinationCore<A> {
@@ -45,6 +51,7 @@ where
             core_map,
             origin_hash,
             own_info,
+            prev_store: HashMap::new(),
         }
     }
 
@@ -299,12 +306,40 @@ where
             let new_core = ItcMap::from_patch(message.patch.expect("Expected patch to be present"));
             if let Some(new_id) = find_first_valid_id(&new_core, self.uuid()) {
                 // TODO: Also add any new peers at this point
+                let peers_missing: Vec<_> = {
+                    let s: HashSet<Uuid> = new_core.iter().map(|(_, n)| n.uuid).collect();
+                    self.core_map
+                        .iter()
+                        .filter_map(|(_, n)| {
+                            if !s.contains(&n.uuid) {
+                                Some(n.to_owned())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                };
 
+                let value = self.timestamp().clone().get(self.id()).max();
+                self.prev_store
+                    .insert(self.origin_hash, (self.id.clone(), value));
                 self.id = new_id;
                 self.core_map = new_core;
                 self.origin_hash = message.origin_hash;
                 let old_timestamp = self.timestamp().clone();
-                self.increment();
+
+                // Use old max value iff it overlaps
+                if let Some((remembered_id, val)) = self.prev_store.get(&self.origin_hash())
+                    && self.id.contains(remembered_id)
+                {
+                    self.id = remembered_id.clone();
+                    let ts = self.timestamp();
+                    let new_ts = ts.clone().join(self.id.set_value(*val));
+                    self.core_map.set_timestamp(new_ts);
+                }
+
+                self.add_peers(peers_missing);
+                //self.increment();
                 assert_ne!(self.timestamp(), &old_timestamp);
                 Some(self.update_message(&message.timestamp))
             } else {
