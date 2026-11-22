@@ -11,8 +11,8 @@ exclude = [
 ]
 
 [workspace.dependencies]
-#treeclocks = { version = "0.10.7", features = ["serde"] }
-treeclocks = { path = "../treeclocks/treeclocks", features = ["serde"] }
+treeclocks = { version = "0.11.0", features = ["serde"] }
+#treeclocks = { path = "../treeclocks/treeclocks", features = ["serde"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
