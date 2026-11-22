@@ -46,9 +46,7 @@ where
     ) -> Vec<(A, PollinationMessage<A>)> {
         self.peer_tracker.receive(peer_msg.uuid);
         if let Some(msg) = self.core.handle_message(peer_msg) {
-            let mut msgs = self.heartbeat();
-            msgs.push((peer_addr, msg));
-            msgs
+            vec![(peer_addr, msg)]
         } else {
             vec![]
         }
@@ -82,10 +80,7 @@ where
             }
         }
 
-        peers
-            .drain(..)
-            .map(|addr| (addr, msg.clone()))
-            .collect()
+        peers.drain(..).map(|addr| (addr, msg.clone())).collect()
     }
 
     pub fn top_k_peers(&self, k: usize) -> Vec<(Uuid, usize)> {

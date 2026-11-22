@@ -7,13 +7,15 @@ use egui::{
 };
 use egui_plot::{HoverPosition, Legend, Line, Plot, PlotPoints};
 use pollination_simulation::{
-    core::{
+    router::{
         NodeInfo, PollinationConfig, PollinationCore, PollinationEvent, PollinationMessage,
-        SimulatedPollinationCore,
+        SimulatedRouter,
     },
     treeclocks::ItcMap,
 };
-use pollination_simulator::{Config, Mail, NodeIndex, Sim, SimNode, history::HistoricalRecord};
+use pollination_simulator::{
+    Config, Mail, NodeIndex, Sim, SimNode, Simulee, history::HistoricalRecord,
+};
 use std::{
     collections::{HashMap, HashSet, hash_map::DefaultHasher},
     hash::{Hash, Hasher as _},
@@ -64,7 +66,7 @@ impl Default for DurableState {
 }
 
 struct EphemeralState {
-    sim: Sim<SimulatedPollinationCore>,
+    sim: Sim<SimulatedRouter>,
     step: bool,
     scene: Rect,
     force_graph_state: ForceGraphState,
@@ -405,8 +407,8 @@ fn hashable_to_color<T: Hash>(hashable: T) -> Color32 {
     Color32::from_rgb(red, green, blue)
 }
 
-fn has_converged(sim: &Sim<SimulatedPollinationCore>) -> bool {
-    sim.has_converged(|s: &SimulatedPollinationCore| (s.membership_hash(), s.origin_hash()))
+fn has_converged(sim: &Sim<SimulatedRouter>) -> bool {
+    sim.has_converged(|s: &SimulatedRouter| (s.membership_hash(), s.origin_hash()))
 }
 
 struct Cached<U> {
@@ -440,7 +442,7 @@ impl<U> Cached<U> {
 
 /* Pseudo Components */
 
-fn draw_sim_node_info(ui: &mut Ui, node: &SimNode<SimulatedPollinationCore>) {
+fn draw_sim_node_info(ui: &mut Ui, node: &SimNode<SimulatedRouter>) {
     egui::ScrollArea::vertical()
         .auto_shrink(true)
         .show(ui, |ui| {
@@ -533,7 +535,7 @@ type MembershipPlotSeries = HashMap<u64, Vec<(f64, f64)>>;
 fn draw_membership_hash_distribution_plot(
     ui: &mut Ui,
     cache: &mut Cached<MembershipPlotSeries>,
-    sim: &Sim<SimulatedPollinationCore>,
+    sim: &Sim<SimulatedRouter>,
 ) {
     let node_count = sim.nodes().count();
     let series = cache.get(|| {
@@ -624,7 +626,7 @@ type OriginPlotSeries = HashMap<u64, Vec<(f64, f64)>>;
 fn draw_origin_hash_distribution_plot(
     ui: &mut Ui,
     cache: &mut Cached<OriginPlotSeries>,
-    sim: &Sim<SimulatedPollinationCore>,
+    sim: &Sim<SimulatedRouter>,
 ) {
     let node_count = sim.nodes().count();
     let series = cache.get(|| {

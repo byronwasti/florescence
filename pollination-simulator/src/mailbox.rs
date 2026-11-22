@@ -29,6 +29,11 @@ impl<Message> Mailbox<Message> {
         }
     }
 
+    /// Used for restoring a message on an unused delivery
+    pub fn push_mail_front(&mut self, mail: Mail<Message>) {
+        self.inner.push_front(mail);
+    }
+
     /// Returns a tuple of (Mail, Delivery) to fascillitate history.
     pub fn get_delivery(&mut self) -> Option<Delivery<Message>> {
         let mail = self.inner.pop_front()?;

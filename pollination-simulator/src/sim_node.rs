@@ -80,7 +80,7 @@ impl<S: Simulee> SimNode<S> {
             if delivered {
                 Some(mail)
             } else {
-                self.mailbox.push_mail(mail);
+                self.mailbox.push_mail_front(mail);
                 None
             }
         } else {
