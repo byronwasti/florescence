@@ -6,6 +6,7 @@ use rand::{
     prelude::*,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -39,7 +40,8 @@ impl Simulee for SimulatedRouter {
 
     fn new<R: Rng + ?Sized>(rng: &mut R, config: &Config<Self::Config>, id: NodeIndex) -> Self {
         let core = PollinationCore::new(Uuid::from_u128(rng.random()), id);
-        let peers = (0..config.node_count).map(|n| NodeIndex::new(n)).collect();
+        let mut peers: VecDeque<_> = (0..config.node_count).map(|n| NodeIndex::new(n)).collect();
+        peers.make_contiguous().shuffle(rng);
         let inner = PollinationRouter::new(core, peers);
         Self {
             inner,
