@@ -1,0 +1,14 @@
+[package]
+name = "pollination-router"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pollination = { "path" = "../pollination-core" }
+serde = { version = "1.0.219", features = ["derive"] }
+rand = "0.10.2"
+uuid = { version = "1.16.0", features = ["serde", "v4"] }
+treeclocks = { workspace = true }
+
+[lints]
+workspace = true

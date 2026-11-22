@@ -2769,10 +2769,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "pollination-router"
+version = "0.1.0"
+dependencies = [
+ "pollination",
+ "rand",
+ "serde",
+ "treeclocks",
+ "uuid",
+]
+
+[[package]]
 name = "pollination-simulation"
 version = "0.1.0"
 dependencies = [
  "pollination",
+ "pollination-router",
  "pollination-simulator",
  "rand",
  "rand_chacha",
@@ -3730,9 +3742,7 @@ dependencies = [
 
 [[package]]
 name = "treeclocks"
-version = "0.10.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b94a763d68d29b8e00b4136552080ca551afcabd6c2a2b82223dd80e0f91c05a"
+version = "0.10.7"
 dependencies = [
  "serde",
  "thiserror 2.0.21",

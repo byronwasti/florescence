@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
-    "pollination-core",
+    "pollination-core", "pollination-router",
     "pollination-simulation",
     "pollination-simulator",
     "pollination-viewer",
@@ -9,6 +9,10 @@ members = [
 exclude = [
     "florescence",
 ]
+
+[workspace.dependencies]
+#treeclocks = { version = "0.10.7", features = ["serde"] }
+treeclocks = { path = "../treeclocks/treeclocks", features = ["serde"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

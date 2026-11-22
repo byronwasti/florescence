@@ -81,6 +81,11 @@ where
         &self.core_map
     }
 
+    pub fn get_peer(&self, uuid: Uuid) -> Option<&NodeInfo<A>> {
+        let id = find_first_valid_id(&self.core_map, uuid)?;
+        self.core_map.get(&id)
+    }
+
     pub fn unique_count(&self) -> usize {
         // TODO: Efficiency
         let unique_count = self
@@ -570,6 +575,7 @@ impl<A: std::fmt::Debug> std::fmt::Display for PollinationCore<A> {
 
 // TODO: This could be expanded to "find_ids"; though probably a smarter ID selection & reorg is
 // better long-term
+// TODO: Realistically this makes sense as a secondary index, not like this...
 fn find_first_valid_id<A>(map: &ItcMap<NodeInfo<A>>, uuid: Uuid) -> Option<IdTree> {
     map.iter()
         .find(|(_, info)| info.uuid == uuid && info.status == NodeStatus::Healthy)

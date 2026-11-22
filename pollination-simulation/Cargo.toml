@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 pollination-simulator = { "path" = "../pollination-simulator" }
+pollination-router = { "path" = "../pollination-router" }
 pollination = { "path" = "../pollination-core" }
 serde = { version = "1.0.219", features = ["derive"] }
 rand = "0.10.2"
